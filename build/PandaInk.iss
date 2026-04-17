@@ -15,7 +15,7 @@ AppSupportURL=https://github.com/danielemarsico/pandaink/issues
 AppUpdatesURL=https://github.com/danielemarsico/pandaink/releases
 DefaultDirName={autopf}\PandaInk
 DefaultGroupName=PandaInk
-OutputDir=dist
+OutputDir={#SourcePath}\..\dist
 OutputBaseFilename=PandaInk-setup
 Compression=lzma
 SolidCompression=yes
@@ -32,7 +32,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "dist\PandaInk.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourcePath}\..\dist\PandaInk.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\PandaInk"; Filename: "{app}\PandaInk.exe"
