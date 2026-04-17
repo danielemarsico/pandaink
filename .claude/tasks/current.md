@@ -1,0 +1,81 @@
+## Tasks
+Complete these in order. After each task, append status to PROGRESS.md. Stop and write "LIMIT REACHED" to PROGRESS.md if you hit token/context limits.
+
+All previous tuhi_win tasks (A1–A6, B1–B4, refactor, bug fixes) are DONE.
+Direction 1 (repo publish), 2b (Help dialog), 2e (website) are DONE.
+Direction 3 W1–W4 (Web BLE connect + register) are DONE.
+See PROGRESS.md for history.
+
+---
+
+# PandaInk — Remaining Work
+Repo: `C:\Users\Daniele\Repos\pandaink`
+Plan: `.claude/virtual-weaving-sunbeam.md`
+
+## Housekeeping (do first)
+
+- [ ] **Delete `web/` directory** — it is a stale copy of the Web BLE app that was merged
+      into `docs/` (commit b6c48ef). `docs/` is now the single source of truth for the
+      Web app. All future W5–W12 work goes in `docs/ble/`, `docs/ui/`, etc.
+- [ ] **Fix CI branch trigger** — `.github/workflows/build.yml` watches `branches: [main]`
+      but the repo uses `master`. Change to `branches: [master]`.
+
+## Direction 2a — Cloud Export
+
+- [ ] Create `src/tuhi/cloud_export.py` with OAuth2 + upload handlers for Google Drive, Dropbox, OneDrive
+- [ ] Replace `[Save SVG]` in `src/tuhi_gui.py` with split button `[Save SVG ▾]` → dropdown: Save locally / Google Drive / Dropbox / OneDrive
+- [ ] Google Drive: `google-api-python-client`, `google-auth-oauthlib`, OAuth2 browser popup, tokens in `%APPDATA%\pandaink\cloud_tokens.json`
+- [ ] Dropbox: `dropbox` SDK, OAuth2 browser popup
+- [ ] OneDrive: `msal` + PKCE, OAuth2 browser popup
+- [ ] Update `requirements.txt` with new deps
+
+## Direction 2c — Test Cases TC11–TC20
+
+- [ ] TC11 Export to Google Drive
+- [ ] TC12 Export to Dropbox
+- [ ] TC13 Export to OneDrive
+- [ ] TC14 Re-authenticate expired cloud token
+- [ ] TC15 Help section opens and navigates tabs
+- [ ] TC16 About dialog shows correct version + license
+- [ ] TC17 Install from installer (first-run)
+- [ ] TC18 Portable EXE runs without installation
+- [ ] TC19 Upgrade: existing drawings preserved
+- [ ] TC20 Multiple devices registered and selectable
+
+## Direction 2d — Installer
+
+- [ ] NSIS or Inno Setup script wrapping the PyInstaller EXE
+- [ ] Add NSIS build step to `.github/workflows/build.yml`
+- [ ] Attach `PandaInk-setup.exe` to GitHub Release alongside portable EXE
+- [ ] Add second download card to `docs/download.html` for the installer
+
+## Direction 2e — Website Screenshots
+
+- [ ] Replace grey placeholder boxes in `docs/features.html` with real screenshots once app is stable
+
+## Direction 3 — Web BLE Remaining (W5–W12)
+
+All work goes in `docs/` (not `web/` — that directory should be deleted, see Housekeeping).
+
+- [ ] **W5** `docs/ble/sync.js` — port `retrieve_data` / `delete_oldest_file`
+- [ ] **W6** `docs/ble/live.js` — port `start_live` / `_on_pen_data_changed`
+- [ ] **W7** `docs/storage/idb_store.js` — IndexedDB CRUD for drawings + device configs
+- [ ] **W8** `docs/ui/drawing_canvas.js` — Canvas 2D rendering with orientation transforms
+- [ ] **W9** `docs/ui/live_canvas.js` — real-time stroke rendering on Canvas 2D
+- [ ] **W10** `docs/export/svg_export.js` — SVG string generation + download trigger
+- [ ] **W11** `docs/ui/app_controller.js` — UI state machine: Normal/Live modes
+- [ ] **W12** Smoke-test on real hardware (Bamboo Folio F4:21:DE:4D:26:BF)
+
+## Hardware Smoke-Tests (pending)
+
+- [ ] CLI: `python tuhi_cli.py live F4:21:DE:4D:26:BF --svg` → draw → Ctrl+C → verify output files
+- [ ] GUI Live mode: Start Live → draw → strokes appear in real time → Stop Live
+
+## Manual / User Steps (must be done by you, cannot be automated)
+
+- [ ] GitHub repo Settings → Pages → source: `master`, folder `/docs` → activate GitHub Pages
+- [ ] Ko-fi: create account at ko-fi.com with username `danielemarsico` — GitHub Sponsor button will link to it automatically via FUNDING.yml
+- [ ] GitHub Sponsors: enrol at github.com/sponsors; once approved uncomment `github: danielemarsico` in `.github/FUNDING.yml`
+- [ ] Lightning donations: create a Lightning Address (e.g. via Wallet of Satoshi or Alby) and add it to `docs/index.html` and `docs/download.html` as a donate link
+- [ ] Upload real screenshots to `docs/` once app is stable
+- [ ] Verify v0.1.1 CI run produced `PandaInk.exe` in GitHub Releases (check Actions tab)
