@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PandaInk — Web App</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <nav>
+    <div class="container">
+      <a class="nav-brand" href="index.html">PandaInk</a>
+      <ul class="nav-links">
+        <li><a href="index.html">Home</a></li>
+        <li><a href="features.html">Features</a></li>
+        <li><a href="download.html">Download</a></li>
+        <li><a href="app.html" class="active">Web App</a></li>
+        <li><a href="https://github.com/danielemarsico/pandaink" target="_blank" rel="noopener">GitHub</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <section class="app-hero">
+    <div class="container">
+      <h2>Web App — Beta</h2>
+      <p>Connect your Wacom SmartPad directly in the browser using Web Bluetooth.
+         Works on <strong>Chrome / Edge</strong> on Windows, macOS and Android.
+         No install required.</p>
+      <p class="app-compat-note">⚠ Not supported on Firefox or Safari.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="container">
+
+      <div class="app-card">
+        <div class="app-status-row">
+          <span id="status" class="app-status">Not connected</span>
+          <button id="connect-btn" class="btn btn-primary">Connect device</button>
+          <button id="forget-btn" class="btn btn-outline" style="display:none">Forget device</button>
+        </div>
+
+        <div id="log" class="app-log"></div>
+      </div>
+
+    </div>
+  </section>
+
+  <footer>
+    <div class="container">
+      <span>PandaInk — GPLv2</span>
+      <div class="footer-links">
+        <a href="https://github.com/tuhiproject/tuhi" target="_blank" rel="noopener">Based on Tuhi</a>
+        <a href="https://github.com/danielemarsico/pandaink" target="_blank" rel="noopener">GitHub</a>
+      </div>
+    </div>
+  </footer>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
