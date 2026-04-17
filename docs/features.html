@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Features — PandaInk</title>
+  <meta name="description" content="Explore PandaInk's features: device registration, offline sync, live mode, SVG export, and orientation support.">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Navigation -->
+  <nav>
+    <div class="container">
+      <a class="nav-brand" href="index.html">PandaInk</a>
+      <ul class="nav-links">
+        <li><a href="index.html">Home</a></li>
+        <li><a href="features.html" class="active">Features</a></li>
+        <li><a href="download.html">Download</a></li>
+        <li><a href="https://github.com/danielemarsico/pandaink" target="_blank" rel="noopener">GitHub</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <main>
+
+    <!-- Page header -->
+    <section style="padding-bottom:1.5rem;">
+      <div class="container">
+        <h1>Features</h1>
+        <p>A focused set of tools for getting your handwritten notes off your Wacom SmartPad and onto your Windows machine.</p>
+      </div>
+    </section>
+
+    <hr class="section-divider">
+
+    <!-- Screenshots -->
+    <section>
+      <div class="container">
+        <h2>Screenshots</h2>
+        <div class="screenshots">
+
+          <div class="screenshot-box">
+            <div class="screenshot-placeholder">[ screenshot ]</div>
+            <span class="screenshot-caption">Normal mode — browse and manage synced drawings</span>
+          </div>
+
+          <div class="screenshot-box">
+            <div class="screenshot-placeholder">[ screenshot ]</div>
+            <span class="screenshot-caption">Live mode — pen strokes stream in real time</span>
+          </div>
+
+          <div class="screenshot-box">
+            <div class="screenshot-placeholder">[ screenshot ]</div>
+            <span class="screenshot-caption">SVG export — save any drawing as a vector file</span>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <hr class="section-divider">
+
+    <!-- Feature detail -->
+    <section>
+      <div class="container">
+        <h2>Feature details</h2>
+
+        <h3>Register Device</h3>
+        <ul class="feature-list" style="margin-bottom:1.5rem;">
+          <li>Scans for nearby Wacom SmartPad devices over Bluetooth LE</li>
+          <li>Supports Bamboo Spark, Bamboo Slate, and Bamboo Folio</li>
+          <li>Saves device address so subsequent launches connect automatically</li>
+          <li>No Wacom drivers or proprietary software required</li>
+        </ul>
+
+        <h3>Sync Offline Drawings (Normal Mode)</h3>
+        <ul class="feature-list" style="margin-bottom:1.5rem;">
+          <li>Pulls all drawings stored on the device since the last sync</li>
+          <li>Drawings are stored locally as JSON and rendered in tabbed view</li>
+          <li>Each tab shows the drawing date and time</li>
+          <li>Tabs can be closed individually without deleting the file on disk</li>
+          <li>Reload drawings from disk at any time with the Fetch button</li>
+        </ul>
+
+        <h3>Live Mode</h3>
+        <ul class="feature-list" style="margin-bottom:1.5rem;">
+          <li>Streams pen strokes to screen as you write — no sync step needed</li>
+          <li>Full-screen canvas with no tabs; orientation respects your current setting</li>
+          <li>Useful for digital annotation, presentations, or real-time note capture</li>
+        </ul>
+
+        <h3>SVG Export</h3>
+        <ul class="feature-list" style="margin-bottom:1.5rem;">
+          <li>Export any synced drawing as a scalable vector graphic (SVG)</li>
+          <li>File save dialog lets you choose location and filename</li>
+          <li>Compatible with Inkscape, Adobe Illustrator, browsers, and more</li>
+        </ul>
+
+        <h3>Portrait &amp; Landscape Orientation</h3>
+        <ul class="feature-list" style="margin-bottom:1.5rem;">
+          <li>Default is Portrait; switch to Landscape without restarting</li>
+          <li>Portrait mode applies a 90° clockwise coordinate rotation so vertical pages display correctly</li>
+          <li>Orientation setting applies to new drawings and the Live canvas; existing tabs are unaffected</li>
+        </ul>
+
+        <h3>Per-Drawing Toolbar</h3>
+        <ul class="feature-list" style="margin-bottom:1.5rem;">
+          <li>Save SVG button in every tab for one-click export</li>
+          <li>Delete button permanently removes the drawing file from disk and closes the tab</li>
+        </ul>
+
+        <h3>Zero Install, Zero Cloud</h3>
+        <ul class="feature-list">
+          <li>Ships as a single portable EXE — copy it anywhere and run it</li>
+          <li>No installation, no admin rights, no registry entries</li>
+          <li>All data stays on your machine — no cloud account required</li>
+          <li>Open source under GPLv2</li>
+        </ul>
+
+      </div>
+    </section>
+
+    <hr class="section-divider">
+
+    <!-- CTA -->
+    <section>
+      <div class="container" style="text-align:center;">
+        <h2>Try it now</h2>
+        <p>One file, no setup. Download and run.</p>
+        <div class="btn-group" style="justify-content:center;">
+          <a class="btn btn-primary"
+             href="https://github.com/danielemarsico/pandaink/releases/latest/download/PandaInk.exe">
+            Download Portable EXE
+          </a>
+          <a class="btn btn-outline" href="download.html">All download options</a>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Footer -->
+  <footer>
+    <div class="container">
+      <div>Released under the <strong>GPLv2</strong> license.</div>
+      <div class="footer-links">
+        <span>Based on <a href="https://github.com/tuhiproject/tuhi" target="_blank" rel="noopener">Tuhi</a></span>
+        <span><a href="https://github.com/danielemarsico/pandaink" target="_blank" rel="noopener">GitHub</a></span>
+      </div>
+    </div>
+  </footer>
+
+</body>
+</html>

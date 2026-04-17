@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Download — PandaInk</title>
+  <meta name="description" content="Download PandaInk as a portable EXE or run it from source on Windows 10/11.">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Navigation -->
+  <nav>
+    <div class="container">
+      <a class="nav-brand" href="index.html">PandaInk</a>
+      <ul class="nav-links">
+        <li><a href="index.html">Home</a></li>
+        <li><a href="features.html">Features</a></li>
+        <li><a href="download.html" class="active">Download</a></li>
+        <li><a href="https://github.com/danielemarsico/pandaink" target="_blank" rel="noopener">GitHub</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <main>
+
+    <!-- Page header -->
+    <section style="padding-bottom:1.5rem;">
+      <div class="container">
+        <h1>Download</h1>
+        <p>PandaInk runs on Windows 10 and Windows 11. No installation required.</p>
+      </div>
+    </section>
+
+    <hr class="section-divider">
+
+    <!-- Requirements -->
+    <section style="padding-top:2rem; padding-bottom:2rem;">
+      <div class="container">
+        <h2>Requirements</h2>
+        <ul class="requirements-list" style="margin-top:1rem;">
+          <li>Windows 10 or Windows 11</li>
+          <li>Bluetooth LE adapter (built-in or USB dongle)</li>
+          <li>A supported Wacom SmartPad device (Bamboo Spark, Slate, or Folio)</li>
+        </ul>
+      </div>
+    </section>
+
+    <hr class="section-divider">
+
+    <!-- Portable EXE -->
+    <section style="padding-top:2rem; padding-bottom:2rem;">
+      <div class="container">
+        <h2>Option 1 — Portable EXE</h2>
+        <p>The easiest way to run PandaInk. Download a single self-contained executable — no Python, no dependencies, no install.</p>
+
+        <div class="download-card">
+          <h3>PandaInk.exe</h3>
+          <p class="meta">Latest release &mdash; Windows 10 / 11 &mdash; x64</p>
+          <a class="btn btn-primary"
+             href="https://github.com/danielemarsico/pandaink/releases/latest/download/PandaInk.exe">
+            Download Portable EXE
+          </a>
+        </div>
+
+        <p style="color:#555; font-size:0.9rem;">
+          Windows may show a SmartScreen warning the first time you run an unsigned executable
+          downloaded from the internet. Click <em>"More info" &rarr; "Run anyway"</em> to proceed.
+          The source code is fully open on GitHub for review.
+        </p>
+      </div>
+    </section>
+
+    <hr class="section-divider">
+
+    <!-- From source -->
+    <section style="padding-top:2rem;">
+      <div class="container">
+        <h2>Option 2 — Run from source</h2>
+        <p>Requires Python 3.10 or later and a working Bluetooth LE stack on Windows.</p>
+
+        <ol class="steps-list">
+          <li>
+            Clone the repository:
+            <pre><code>git clone https://github.com/danielemarsico/pandaink.git
+cd pandaink</code></pre>
+          </li>
+          <li>
+            (Recommended) Create and activate a virtual environment:
+            <pre><code>python -m venv .venv
+.venv\Scripts\activate</code></pre>
+          </li>
+          <li>
+            Install dependencies:
+            <pre><code>pip install -r requirements.txt</code></pre>
+          </li>
+          <li>
+            Launch the GUI:
+            <pre><code>python src/tuhi_gui.py</code></pre>
+          </li>
+        </ol>
+
+        <p style="margin-top:1rem;">
+          For the command-line interface, run <code>python src/tuhi_cli.py --help</code> instead.
+        </p>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Footer -->
+  <footer>
+    <div class="container">
+      <div>Released under the <strong>GPLv2</strong> license.</div>
+      <div class="footer-links">
+        <span>Based on <a href="https://github.com/tuhiproject/tuhi" target="_blank" rel="noopener">Tuhi</a></span>
+        <span><a href="https://github.com/danielemarsico/pandaink" target="_blank" rel="noopener">GitHub</a></span>
+      </div>
+    </div>
+  </footer>
+
+</body>
+</html>
