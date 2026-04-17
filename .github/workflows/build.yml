@@ -18,24 +18,27 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
-          pip install pyinstaller
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt pyinstaller
 
       - name: Build portable EXE
-        run: python -m PyInstaller build/PandaInk.spec
+        run: python -m PyInstaller build/PandaInk.spec --distpath dist --workpath build/work
 
       - name: Install Inno Setup
         run: choco install innosetup --yes --no-progress
 
       - name: Build installer
-        shell: cmd
+        shell: pwsh
         run: |
-          set VERSION=${{ github.ref_name }}
-          if "%VERSION:~0,1%"=="v" set VERSION=%VERSION:~1%
-          if "%VERSION%"=="master" set VERSION=dev
-          "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersion=%VERSION% build\PandaInk.iss
+          $ref = "${{ github.ref_name }}"
+          $version = if ($ref -match '^v(.+)$') { $Matches[1] } elseif ($ref -eq 'master') { 'dev' } else { $ref }
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            $iscc = (Get-ChildItem "C:\Program Files*\Inno Setup*\ISCC.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
+          }
+          Write-Host "Using ISCC: $iscc  version: $version"
+          & $iscc /DMyAppVersion=$version build\PandaInk.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Upload portable EXE artifact
         uses: actions/upload-artifact@v4
