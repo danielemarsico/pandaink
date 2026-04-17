@@ -1,16 +1,15 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_data_files
+from PyInstaller.utils.hooks import collect_all, collect_data_files
 
-datas = collect_data_files('tuhi', subdir=None, include_py_files=True)
+bleak_datas, bleak_binaries, bleak_hiddenimports = collect_all('bleak')
+src_datas = collect_data_files('tuhi', subdir=None, include_py_files=True)
 
 a = Analysis(
     ['../src/tuhi_gui.py'],
     pathex=['../src'],
-    binaries=[],
-    datas=datas,
-    hiddenimports=[
-        'bleak',
-        'bleak.backends.winrt',
+    binaries=bleak_binaries,
+    datas=bleak_datas + src_datas,
+    hiddenimports=bleak_hiddenimports + [
         'asyncio',
         'tkinter',
         'tkinter.ttk',
