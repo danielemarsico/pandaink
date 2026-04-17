@@ -24,7 +24,7 @@ jobs:
           pip install pyinstaller
 
       - name: Build portable EXE
-        run: pyinstaller build/PandaInk.spec
+        run: python -m PyInstaller build/PandaInk.spec
 
       - name: Install Inno Setup
         run: choco install innosetup --yes --no-progress
