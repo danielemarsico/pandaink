@@ -4,7 +4,10 @@ __pycache__/
 .venv/
 venv/
 dist/
+build/work/
+build/PandaInk/
 *.egg-info/
 *.exe
 *.log
 .env
+.claude/settings.local.json

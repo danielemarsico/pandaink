@@ -2,10 +2,10 @@ name: Build
 
 on:
   push:
-    branches: [main]
+    branches: [master]
     tags: ["v*"]
   pull_request:
-    branches: [main]
+    branches: [master]
 
 jobs:
   build-windows:
@@ -24,19 +24,37 @@ jobs:
           pip install pyinstaller
 
       - name: Build portable EXE
-        run: |
-          pyinstaller build/PandaInk.spec
+        run: pyinstaller build/PandaInk.spec
 
-      - name: Upload portable EXE
+      - name: Install Inno Setup
+        run: choco install innosetup --yes --no-progress
+
+      - name: Build installer
+        shell: cmd
+        run: |
+          set VERSION=${{ github.ref_name }}
+          if "%VERSION:~0,1%"=="v" set VERSION=%VERSION:~1%
+          if "%VERSION%"=="master" set VERSION=dev
+          "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersion=%VERSION% build\PandaInk.iss
+
+      - name: Upload portable EXE artifact
         uses: actions/upload-artifact@v4
         with:
           name: PandaInk-portable
           path: dist/PandaInk.exe
 
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PandaInk-installer
+          path: dist/PandaInk-setup.exe
+
       - name: Attach to GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/PandaInk.exe
+          files: |
+            dist/PandaInk.exe
+            dist/PandaInk-setup.exe
           name: PandaInk ${{ github.ref_name }}
           generate_release_notes: true
