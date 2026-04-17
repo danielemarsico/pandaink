@@ -1,0 +1,12 @@
+# PandaInk dependencies
+# Install with: pip install -r requirements.txt
+# Requires Python 3.12+
+
+# BLE communication (replaces BlueZ)
+bleak>=0.21.0
+
+# SVG export
+svgwrite
+
+# PNG export (replaces pycairo)
+Pillow

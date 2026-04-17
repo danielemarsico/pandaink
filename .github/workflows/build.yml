@@ -1,0 +1,46 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build portable EXE
+        run: |
+          pyinstaller --onefile --windowed --name PandaInk `
+            --hidden-import bleak `
+            --hidden-import asyncio `
+            --hidden-import tkinter `
+            src/tuhi_gui.py
+
+      - name: Upload portable EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: PandaInk-portable
+          path: dist/PandaInk.exe
+
+      - name: Attach to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/PandaInk.exe
+          name: PandaInk ${{ github.ref_name }}
+          generate_release_notes: true
