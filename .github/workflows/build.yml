@@ -25,11 +25,7 @@ jobs:
 
       - name: Build portable EXE
         run: |
-          pyinstaller --onefile --windowed --name PandaInk `
-            --hidden-import bleak `
-            --hidden-import asyncio `
-            --hidden-import tkinter `
-            src/tuhi_gui.py
+          pyinstaller build/PandaInk.spec
 
       - name: Upload portable EXE
         uses: actions/upload-artifact@v4
