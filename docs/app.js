@@ -64,8 +64,13 @@ connectBtn.addEventListener('click', async () => {
             forgetBtn.style.display = '';
         }
     } catch (err) {
-        setStatus('Error: ' + err.message);
-        log('Error: ' + err.message);
+        // NotFoundError = user cancelled the BLE picker; not an error worth surfacing
+        if (err.name === 'NotFoundError') {
+            setStatus('Not connected');
+        } else {
+            setStatus('Error: ' + err.message);
+            log('Error: ' + err.message);
+        }
         connectBtn.disabled = false;
     }
 });

@@ -7,6 +7,7 @@ export class BleManager {
         this._service = null;
         this._characteristics = new Map();
         this._notifyHandlers = new Map();
+        this._disconnectHandler = null;
         this.ondisconnect = null;
     }
 
@@ -21,9 +22,10 @@ export class BleManager {
             ],
         });
 
-        this._device.addEventListener('gattserverdisconnected', () => {
+        this._disconnectHandler = () => {
             if (this.ondisconnect) this.ondisconnect();
-        });
+        };
+        this._device.addEventListener('gattserverdisconnected', this._disconnectHandler);
 
         this._server = await this._device.gatt.connect();
         this._service = await this._server.getPrimaryService(NORDIC_UART_SERVICE_UUID);
@@ -36,8 +38,14 @@ export class BleManager {
     }
 
     async disconnect() {
-        if (this._device && this._device.gatt.connected) {
-            this._device.gatt.disconnect();
+        if (this._device) {
+            if (this._disconnectHandler) {
+                this._device.removeEventListener('gattserverdisconnected', this._disconnectHandler);
+                this._disconnectHandler = null;
+            }
+            if (this._device.gatt.connected) {
+                this._device.gatt.disconnect();
+            }
         }
         this._server = null;
         this._service = null;
@@ -66,6 +74,14 @@ export class BleManager {
 
     async startNotify(uuid, callback) {
         const char = await this._getCharacteristic(uuid);
+
+        // Remove any stale handler for this UUID before adding a new one.
+        // Without this, rapid startNotify calls stack duplicate DOM listeners.
+        const existing = this._notifyHandlers.get(uuid);
+        if (existing) {
+            char.removeEventListener('characteristicvaluechanged', existing);
+        }
+
         const handler = (event) => callback(event.target.value);
         this._notifyHandlers.set(uuid, handler);
         char.addEventListener('characteristicvaluechanged', handler);
@@ -73,12 +89,12 @@ export class BleManager {
     }
 
     async stopNotify(uuid) {
-        const char = await this._getCharacteristic(uuid);
         const handler = this._notifyHandlers.get(uuid);
-        if (handler) {
-            char.removeEventListener('characteristicvaluechanged', handler);
-            this._notifyHandlers.delete(uuid);
-        }
+        if (!handler) return;
+
+        const char = await this._getCharacteristic(uuid);
+        char.removeEventListener('characteristicvaluechanged', handler);
+        this._notifyHandlers.delete(uuid);
         await char.stopNotifications();
     }
 }
