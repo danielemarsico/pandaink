@@ -46,6 +46,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from tuhi.app import TuhiApp
 from tuhi.config_win import TuhiConfig, get_default_data_dir
 from tuhi.export_win import JsonSvg
+from help_dialog import HelpDialog
 
 CANVAS_W = 900
 CANVAS_H = 600
@@ -356,6 +357,9 @@ class TuhiGUIApp(tk.Tk):
                         value='landscape', command=self._on_orientation_changed).pack(side='left')
         ttk.Radiobutton(row2, text='Portrait', variable=self._orientation,
                         value='portrait', command=self._on_orientation_changed).pack(side='left', padx=8)
+
+        ttk.Button(row2, text='Help',
+                   command=lambda: HelpDialog(self)).pack(side='right', padx=2)
 
         # Row 3: status bar
         ttk.Label(top, textvariable=self._status,
