@@ -54,6 +54,7 @@ class AppDevice(Object):
         self._live = False
         self._uhid_fd = -1
         self.drawings = {}  # timestamp -> Drawing
+        self.pressure_threshold_pct = 0
 
     @Property
     def listening(self):
@@ -137,8 +138,8 @@ class TuhiApp:
                            lambda mgr, dev: self._add_device(mgr, dev, True))
 
     def stop(self):
-        """Stop BLE scanning."""
-        self.bluez.stop_discovery()
+        """Stop BLE scanning and fully shut down the event loop."""
+        self.bluez.shutdown()
 
     # ------------------------------------------------------------------ #
     # Public CLI API                                                       #
@@ -267,13 +268,16 @@ class TuhiApp:
         if not any(dev.listening for dev in self._app_devices.values()):
             self.bluez.stop_discovery()
 
-    def start_live(self, address, on_pen_point=None):
+    def start_live(self, address, on_pen_point=None, pressure_threshold_pct=0):
         """
         Start live pen streaming for *address*.  Non-blocking.
 
         on_pen_point(x, y, pressure, in_proximity) is called on the BLE
         thread for every incoming pen event.  Use root.after(0, ...) in a
         GUI to marshal back to the UI thread.
+
+        pressure_threshold_pct (0-100): pen points with pressure below this
+        percentage of the device maximum are silently dropped.
 
         Raises KeyError if *address* is not registered in config.
         """
@@ -284,6 +288,7 @@ class TuhiApp:
             self._app_devices[address] = AppDevice()
 
         app_dev = self._app_devices[address]
+        app_dev.pressure_threshold_pct = pressure_threshold_pct
 
         if on_pen_point:
             app_dev.connect('live-pen-data',
@@ -353,7 +358,9 @@ class TuhiApp:
 
         if mode == DeviceMode.REGISTER:
             d.mode = mode
-        elif app_dev.listening and not d.busy:
+        elif app_dev.live and not d.busy and not d._bluez_device.connected:
+            d.live_connect()
+        elif app_dev.listening and not d.busy and not d._bluez_device.connected:
             d.listen()
 
     def _on_discovery_stopped(self, manager):

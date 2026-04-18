@@ -168,16 +168,32 @@ class BleakBLEDevice(Object):
 
     async def _async_connect(self, client):
         await client.connect()
-        # Resolve characteristics
+        # Resolve characteristics — update existing objects on reconnect so
+        # their _characteristic reference points to the new connection.
         for service in client.services:
             for char in service.characteristics:
                 uuid = char.uuid
-                if uuid not in self.characteristics:
+                if uuid in self.characteristics:
+                    self.characteristics[uuid]._characteristic = char
+                    self.characteristics[uuid]._notifying = False
+                else:
                     self.characteristics[uuid] = BleakCharacteristic(self, char)
                     self.logger.debug(f'GattCharacteristic: {uuid}')
 
         # Publish the connected client only after service discovery succeeds.
         self._bleak_client = client
+
+        # Re-subscribe every characteristic that has registered callbacks.
+        # BLE notifications don't survive a reconnect so we must re-enable them.
+        for uuid, chrc in self.characteristics.items():
+            if chrc._property_callbacks:
+                try:
+                    await client.start_notify(chrc._characteristic.uuid,
+                                              chrc._on_notification)
+                    chrc._notifying = True
+                except Exception as e:
+                    self.logger.debug(f'Re-subscribe {uuid} failed: {e}')
+
         self._connected = True
         self._connecting = False
         threading.Thread(target=self.emit, args=('connected',), daemon=True).start()
@@ -210,7 +226,8 @@ class BleakBLEDevice(Object):
             chrc.connect_property('Value', callback)
             chrc.start_notify()
         except KeyError:
-            pass
+            logger.warning(f'{self.address}: characteristic {uuid} not found — '
+                           f'available: {list(self.characteristics.keys())}')
 
     def update_scanner_device(self, scanner_device, advertisement_data):
         """Update the underlying scanner device data (during discovery)."""
@@ -289,7 +306,7 @@ class BleakDeviceManager(Object):
         asyncio.run_coroutine_threadsafe(_scan(), self._loop)
 
     def stop_discovery(self):
-        """Stop BLE discovery."""
+        """Stop BLE discovery and wait for the scanner to fully stop."""
         if not self._discovery:
             return
 
@@ -303,5 +320,19 @@ class BleakDeviceManager(Object):
                     logger.debug(f'Failed to stop discovery: {e}')
             logger.debug('Discovery stopped')
 
-        asyncio.run_coroutine_threadsafe(_stop(), self._loop)
+        future = asyncio.run_coroutine_threadsafe(_stop(), self._loop)
+        try:
+            future.result(timeout=5)
+        except Exception as e:
+            logger.debug(f'stop_discovery wait failed: {e}')
         self.emit('discovery-stopped')
+
+    def shutdown(self):
+        """Stop discovery, stop the event loop, and join the background thread."""
+        self.stop_discovery()
+        if self._loop is not None:
+            self._loop.call_soon_threadsafe(self._loop.stop)
+        if self._loop_thread is not None:
+            self._loop_thread.join(timeout=3)
+        self._loop = None
+        self._loop_thread = None

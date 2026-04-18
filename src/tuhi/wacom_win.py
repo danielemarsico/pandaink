@@ -236,6 +236,12 @@ class WacomProtocolLowLevelComm(Object):
         device.connect_gatt_value(NORDIC_UART_CHRC_RX_UUID,
                                   self._on_nordic_data_received)
 
+    def flush_nordic_state(self):
+        """Discard any leftover Nordic UART data from a previous BLE session."""
+        self.nordic_answer = []
+        while self.nordic_event.acquire(blocking=False):
+            pass
+
     def _on_nordic_data_received(self, name, value):
         self.fw_logger.nordic.recv(value)
         self.nordic_answer += value
@@ -320,11 +326,13 @@ class WacomProtocolBase(WacomProtocolLowLevelComm):
         self.pen_data_buffer = []
         self._uhid_device = None
         self._last_pen_data_time = time.time() - 5
+        self._pressure_threshold = 0  # raw device units; 0 = no filtering
 
-        device.connect_gatt_value(WACOM_CHRC_LIVE_PEN_DATA_UUID,
-                                  self._on_pen_data_changed)
         device.connect_gatt_value(WACOM_OFFLINE_CHRC_PEN_DATA_UUID,
                                   self._on_pen_data_received)
+        # Live pen data subscription deferred to start_live() so the device
+        # is already in LIVE mode when we subscribe (some firmware versions
+        # only activate notifications after the mode switch).
 
     @Property
     def dimensions(self):
@@ -355,10 +363,14 @@ class WacomProtocolBase(WacomProtocolLowLevelComm):
                     if self._uhid_device is not None:
                         self._uhid_device.call_input_event([1, 0, 0, 0, 0, 0, 0, 0])
                 else:
-                    x = int.from_bytes(data[0:2], byteorder='little')
-                    y = int.from_bytes(data[2:4], byteorder='little')
+                    x = int.from_bytes(data[0:2], byteorder='little') * self.point_size
+                    y = int.from_bytes(data[2:4], byteorder='little') * self.point_size
                     pressure = int.from_bytes(data[4:6], byteorder='little')
                     logger.debug(f'New Pen Data: ({x},{y}), pressure: {pressure}')
+                    if pressure < self._pressure_threshold:
+                        data = data[6:]
+                        self._timestamp += 5
+                        continue
                     self.emit('live-pen-data', x, y, pressure, True)
                     if self._uhid_device is not None:
                         self._uhid_device.call_input_event([1, 1, *data[:6]])
@@ -425,6 +437,8 @@ class WacomProtocolBase(WacomProtocolLowLevelComm):
     def start_live(self, fd):
         self.p.execute(Interactions.SET_MODE, Mode.LIVE)
         logger.debug(f'Starting wacom live mode on fd: {fd}')
+        self.device.connect_gatt_value(WACOM_CHRC_LIVE_PEN_DATA_UUID,
+                                       self._on_pen_data_changed)
 
         rdesc = wacom_live_rdesc_template[:]
         for i, v in enumerate(rdesc):
@@ -569,17 +583,27 @@ class WacomProtocolBase(WacomProtocolLowLevelComm):
         self.update_dimensions()
 
     def live_mode(self, mode, uhid):
-        try:
-            if mode:
+        if mode:
+            try:
                 self.check_connection()
+            except DeviceError as e:
+                if e.errorcode == DeviceError.ErrorCode.INVALID_STATE:
+                    logger.debug('check_connection returned INVALID_STATE in live mode — proceeding anyway')
+                else:
+                    raise
+            try:
                 self.start_live(uhid)
-            else:
+            except DeviceError as e:
+                if e.errorcode == DeviceError.ErrorCode.INVALID_STATE:
+                    logger.warning('Device rejected live mode (INVALID_STATE). '
+                                   'Press the button until the LED is solid green, then retry.')
+                else:
+                    raise
+        else:
+            try:
                 self.stop_live()
-        except DeviceError as e:
-            if e.errorcode == DeviceError.ErrorCode.INVALID_STATE:
-                logger.warning("no data, please make sure the LED is blue and the button is pressed to switch it back to green")
-            else:
-                raise e
+            except Exception as e:
+                logger.debug(f'stop_live failed (device may have disconnected): {e}')
 
 
 class WacomProtocolSpark(WacomProtocolBase):
@@ -817,11 +841,13 @@ class WacomDevice(Object):
         try:
             if mode == DeviceMode.LIVE:
                 assert self._wacom_protocol is not None
+                self._wacom_protocol.flush_nordic_state()
                 self._wacom_protocol.live_mode(args[1], args[2])
             elif mode == DeviceMode.REGISTER:
                 self.register_device()
             else:
                 assert self._wacom_protocol is not None
+                self._wacom_protocol.flush_nordic_state()
                 self.sync_state = 1
                 self._wacom_protocol.retrieve_data()
         except DeviceError as e:
@@ -845,7 +871,10 @@ class WacomDevice(Object):
         self.thread = threading.Thread(target=self._run, args=(DeviceMode.LISTEN,))
         self.thread.start()
 
-    def start_live(self, uhid_fd):
+    def start_live(self, uhid_fd, pressure_threshold_pct=0):
+        if self._wacom_protocol is not None:
+            self._wacom_protocol._pressure_threshold = (
+                pressure_threshold_pct * self._wacom_protocol.pressure / 100.0)
         self.thread = threading.Thread(target=self._run, args=(DeviceMode.LIVE, True, uhid_fd))
         self.thread.start()
 

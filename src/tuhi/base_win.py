@@ -57,6 +57,7 @@ class TuhiDevice(Object):
         self._battery_state = TuhiDevice.BatteryState.UNKNOWN
         self._battery_percent = 0
         self._signals = {'connected': None, 'disconnected': None}
+        self._live_signal_connected = False
         self._bluez_device = bluez_device
         self._tuhi_dbus_device = None
 
@@ -158,6 +159,9 @@ class TuhiDevice(Object):
     def listen(self):
         self._connect_device(DeviceMode.LISTEN)
 
+    def live_connect(self):
+        self._connect_device(DeviceMode.LIVE)
+
     def _on_bluez_device_connected(self, bluez_device, mode):
         logger.debug(f'{bluez_device.address}: connected for {mode}')
         if self._wacom_device is None:
@@ -173,11 +177,14 @@ class TuhiDevice(Object):
         if mode == DeviceMode.REGISTER:
             self._wacom_device.start_register()
         elif mode == DeviceMode.LIVE:
-            self._wacom_device.connect(
-                'live-pen-data',
-                lambda wdev, x, y, p, inp, ddev: ddev.emit('live-pen-data', x, y, p, inp),
-                self._tuhi_dbus_device)
-            self._wacom_device.start_live(self._tuhi_dbus_device.uhid_fd)
+            if not self._live_signal_connected:
+                self._wacom_device.connect(
+                    'live-pen-data',
+                    lambda wdev, x, y, p, inp, ddev: ddev.emit('live-pen-data', x, y, p, inp),
+                    self._tuhi_dbus_device)
+                self._live_signal_connected = True
+            pct = getattr(self._tuhi_dbus_device, 'pressure_threshold_pct', 0)
+            self._wacom_device.start_live(self._tuhi_dbus_device.uhid_fd, pct)
         else:
             self._wacom_device.start_listen()
 

@@ -51,7 +51,8 @@ class ImageExportBase:
                 elif self.orientation == 'reverse-landscape':
                     x, y = width - x, height - y
 
-                delta = (p['pressure'] - 0x8000) / 0x8000
+                pressure = p.get('pressure') or 0x8000  # 0/missing → mid-range (no pressure sensor)
+                delta = (pressure - 0x8000) / 0x8000
                 stroke_width = self._base_pen_width + self._pen_pressure_width_factor * delta
                 points_with_sk_width.append((x, y, stroke_width))
 

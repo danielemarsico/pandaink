@@ -48,6 +48,12 @@ from tuhi.config_win import TuhiConfig, get_default_data_dir
 from tuhi.export_win import JsonSvg
 from help_dialog import HelpDialog
 
+try:
+    import tuhi.cloud_export as _cloud
+    _CLOUD_AVAILABLE = True
+except ImportError:
+    _CLOUD_AVAILABLE = False
+
 CANVAS_W = 900
 CANVAS_H = 600
 
@@ -233,7 +239,7 @@ class LiveCanvas(tk.Canvas):
     root.after(0, ...) to ensure it runs on the UI thread.
     """
 
-    def __init__(self, parent, device_dimensions=(21600, 14800),
+    def __init__(self, parent, device_dimensions=(297000, 216000),
                  orientation='portrait', **kwargs):
         kwargs.setdefault('bg', 'white')
         super().__init__(parent, **kwargs)
@@ -401,6 +407,12 @@ class TuhiGUIApp(tk.Tk):
         btn = ttk.Button(bar, text='Start Live', command=self._cmd_toggle_live)
         btn.pack(side='left', padx=2)
         self._buttons['live'] = btn
+
+        ttk.Label(bar, text='Min pressure:').pack(side='left', padx=(12, 2))
+        self._pressure_threshold = tk.IntVar(value=5)
+        ttk.Spinbox(bar, from_=0, to=50, width=4,
+                    textvariable=self._pressure_threshold).pack(side='left')
+        ttk.Label(bar, text='%').pack(side='left', padx=(1, 0))
 
         self._live_canvas = LiveCanvas(self._live_frame,
                                        orientation=self._orientation.get(),
@@ -596,23 +608,67 @@ class TuhiGUIApp(tk.Tk):
                                width=CANVAS_W, height=CANVAS_H)
         canvas.pack(fill='both', expand=True)
 
+        safe_ts = ts.replace(' ', '_').replace(':', '-')
+        default_svg_name = f'drawing_{safe_ts}.svg'
+
+        def _get_svg_bytes():
+            import json as _json, tempfile
+            with tempfile.NamedTemporaryFile(suffix='.svg', delete=False) as f:
+                tmp = f.name
+            try:
+                JsonSvg(_json.loads(drawing.to_json()), canvas._orientation, tmp)
+                with open(tmp, 'rb') as f:
+                    return f.read()
+            finally:
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+
         def _save_svg():
-            safe_ts = ts.replace(' ', '_').replace(':', '-')
             path = filedialog.asksaveasfilename(
                 parent=self,
                 defaultextension='.svg',
                 filetypes=[('SVG files', '*.svg'), ('All files', '*.*')],
-                initialfile=f'drawing_{safe_ts}.svg',
+                initialfile=default_svg_name,
                 title='Save drawing as SVG',
             )
             if not path:
                 return
             try:
-                import json as _json
-                JsonSvg(_json.loads(drawing.to_json()), canvas._orientation, path)
+                svg_data = _get_svg_bytes()
+                with open(path, 'wb') as f:
+                    f.write(svg_data)
                 self._set_status(f'Saved: {os.path.basename(path)}')
             except Exception as e:
                 messagebox.showerror('Export failed', str(e))
+
+        def _cloud_upload(provider_fn, provider_name, **kwargs):
+            self._set_status(f'Uploading to {provider_name}…')
+            svg_data = _get_svg_bytes()
+
+            def _do():
+                try:
+                    provider_fn(svg_data, default_svg_name, **kwargs)
+                    self.after(0, lambda: self._set_status(
+                        f'Uploaded to {provider_name}: {default_svg_name}'))
+                except Exception as e:
+                    self.after(0, lambda: messagebox.showerror(
+                        f'{provider_name} export failed', str(e)))
+
+            threading.Thread(target=_do, daemon=True).start()
+
+        def _save_google_drive():
+            _cloud_upload(_cloud.upload_google_drive, 'Google Drive')
+
+        def _save_dropbox():
+            _cloud_upload(
+                lambda data, name: _cloud.upload_dropbox(data, name, parent_widget=self),
+                'Dropbox',
+            )
+
+        def _save_onedrive():
+            _cloud_upload(_cloud.upload_onedrive, 'OneDrive')
 
         def _delete_drawing():
             if not messagebox.askyesno(
@@ -629,7 +685,15 @@ class TuhiGUIApp(tk.Tk):
             self._notebook.forget(frame)
             self._set_status(f'Deleted drawing from {ts}.')
 
-        ttk.Button(toolbar, text='Save SVG', command=_save_svg).pack(side='left', padx=2)
+        save_menu = tk.Menu(toolbar, tearoff=0)
+        save_menu.add_command(label='Save locally…', command=_save_svg)
+        if _CLOUD_AVAILABLE:
+            save_menu.add_separator()
+            save_menu.add_command(label='Google Drive', command=_save_google_drive)
+            save_menu.add_command(label='Dropbox', command=_save_dropbox)
+            save_menu.add_command(label='OneDrive', command=_save_onedrive)
+
+        ttk.Menubutton(toolbar, text='Save SVG ▾', menu=save_menu).pack(side='left', padx=2)
         ttk.Button(toolbar, text='Delete', command=_delete_drawing).pack(side='left', padx=2)
 
         # × is in the tab label (ClosableNotebook handles the click)
@@ -667,7 +731,8 @@ class TuhiGUIApp(tk.Tk):
             self.after(0, lambda: self._live_canvas.on_pen_point(
                 x, y, pressure, in_proximity))
 
-        self._app.start_live(self._address, on_pen_point=on_pen_point)
+        self._app.start_live(self._address, on_pen_point=on_pen_point,
+                             pressure_threshold_pct=self._pressure_threshold.get())
 
     def _stop_live(self):
         if self._address:

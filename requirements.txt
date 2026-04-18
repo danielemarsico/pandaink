@@ -10,3 +10,10 @@ svgwrite
 
 # PNG export (replaces pycairo)
 Pillow
+
+# Cloud export (Google Drive, Dropbox, OneDrive)
+# These are optional — cloud export is disabled automatically if not installed.
+google-api-python-client>=2.0
+google-auth-oauthlib>=1.0
+dropbox>=11.0
+msal>=1.20

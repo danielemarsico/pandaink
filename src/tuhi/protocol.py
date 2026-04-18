@@ -451,7 +451,8 @@ class DeviceError(ProtocolError):
         # All the other errors are something the user can't do
         # anything about.
         if self.errorcode == DeviceError.ErrorCode.INVALID_STATE:
-            self.errno = errno.EBADE
+            # errno.EBADE ("Invalid exchange") is Linux-only; fall back to EBADF on Windows.
+            self.errno = getattr(errno, 'EBADE', errno.EBADF)
 
     def __str__(self):
         return f'DeviceError.{self.errorcode.name}'

@@ -2,6 +2,34 @@
 
 ---
 
+## PandaInk — Session 2026-04-18
+
+### Completed this session
+
+| Area | What |
+|---|---|
+| **Housekeeping** | Both tasks already done: `web/` deleted, CI branch already `master`, installer already built. |
+| **Direction 2a — Cloud Export** | `src/tuhi/cloud_export.py` — Google Drive (google-auth-oauthlib + google-api-python-client), Dropbox (SDK PKCE + code dialog), OneDrive (MSAL interactive). Tokens in `%APPDATA%\pandaink\cloud_tokens.json`. |
+| **Direction 2a — GUI** | `src/tuhi_gui.py` — `[Save SVG]` replaced with `ttk.Menubutton` "Save SVG ▾" dropdown: Save locally / Google Drive / Dropbox / OneDrive. Cloud uploads run in background threads. |
+| **Direction 2a — requirements.txt** | Added: `google-api-python-client>=2.0`, `google-auth-oauthlib>=1.0`, `dropbox>=11.0`, `msal>=1.20`. |
+| **Direction 2c — TC11–TC20** | Created all 10 test case markdown files: TC11 Google Drive, TC12 Dropbox, TC13 OneDrive, TC14 Re-auth, TC15 Help dialog, TC16 About version, TC17 Installer, TC18 Portable EXE, TC19 Upgrade, TC20 Multiple devices. |
+| **Direction 3 W5** | `docs/ble/sync.js` — full offline sync: connect, SET_FILE_TRANSFER, SET_MODE PAPER, AVAILABLE_FILES, loop GET_STROKES→DOWNLOAD→CRC→DELETE, binary stroke parser (ports StrokeFile from protocol.py). |
+| **Direction 3 W6** | `docs/ble/live.js` — `startLive()` / `_on_pen_data_changed()` port; handles 0xa1 coordinate packets, pen-lift (ff ff ff ff ff ff), returns session.stop(). |
+| **Direction 3 W7** | `docs/storage/idb_store.js` — IndexedDB CRUD: `drawings` (by_device index) + `devices` stores; saveDrawing, getDrawingsByDevice, deleteDrawing, saveDevice, getDevice. |
+| **Direction 3 W8** | `docs/ui/drawing_canvas.js` — `DrawingCanvas` class; letterbox transform, portrait/landscape/reverse-* orientations, pressure → line width. |
+| **Direction 3 W9** | `docs/ui/live_canvas.js` — `LiveCanvas` class; incremental rendering, orientation transform, resize handling. |
+| **Direction 3 W10** | `docs/export/svg_export.js` — `drawingToSvg()` (ports JsonSvg from export_win.py) + `downloadSvg()` Blob download trigger. |
+| **Direction 3 W11** | `docs/ui/app_controller.js` — Full UI state machine: Normal/Live modes, Connect/Register, Sync, drawing tabs (render + Save SVG + Delete), Live canvas wiring. `docs/app.js` and `docs/app.html` updated to use AppController. CSS added to `docs/style.css`. |
+
+### Pending
+
+- **Direction 2e** — Replace grey placeholder boxes in `docs/features.html` with real screenshots (manual).
+- **Direction 3 W12** — Hardware smoke-test on real device (manual, needs Bamboo Folio F4:21:DE:4D:26:BF).
+- **Hardware smoke-tests** — CLI `live` command, GUI Live mode (manual, needs hardware).
+- **Manual items** — Ko-fi account, GitHub Sponsors enrollment, Lightning donations link, real screenshots.
+
+---
+
 ## PandaInk — Session 2026-04-17 (alignment pass)
 **Issues identified:** (1) `web/` dir is a stale duplicate of `docs/` — must be deleted.
 (2) CI `build.yml` triggers on `branches: [main]` but repo uses `master` — CI never fires on push.

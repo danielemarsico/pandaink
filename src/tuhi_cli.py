@@ -162,13 +162,14 @@ def cmd_live(args):
     if stored:
         dims = stored[0].dimensions
     else:
-        dims = (21600, 14800)  # Bamboo Folio default
+        dims = (297000, 216000)  # Bamboo Folio default (A4, µm)
 
     timestamp = int(time.time())
     drawing = Drawing(device_name, dims, timestamp)
 
     print(f'Starting live mode on {address}...')
-    print('Draw on your device. Press Ctrl+C to finish.\n')
+    print('Scanning for device — make sure the LED is green (paper mode).')
+    print('Press Ctrl+C to stop.\n')
 
     def on_pen_point(x, y, pressure, in_proximity):
         if in_proximity:
@@ -176,11 +177,14 @@ def cmd_live(args):
             if stroke is None:
                 stroke = drawing.new_stroke()
             stroke.new_abs(position=(x, y), pressure=pressure)
+            print('.', end='', flush=True)
         else:
             if drawing.current_stroke is not None:
                 drawing.current_stroke.seal()
+                print('|', end='', flush=True)
 
-    app.start_live(address, on_pen_point=on_pen_point)
+    app.start_live(address, on_pen_point=on_pen_point,
+                   pressure_threshold_pct=args.pressure_threshold)
 
     try:
         while True:
@@ -210,7 +214,7 @@ def cmd_live(args):
             from tuhi.export_win import JsonSvg
             import json as jsonlib
             svg_path = f'{output_dir}/live_{ts_str}.svg'
-            JsonSvg(jsonlib.loads(json_data), 'landscape', svg_path)
+            JsonSvg(jsonlib.loads(json_data), args.orientation, svg_path)
             print(f'SVG:   {svg_path}')
         except Exception as e:
             print(f'SVG export failed: {e}')
@@ -235,13 +239,16 @@ def cmd_fetch(args):
         print('No drawings available. Use "listen" to sync drawings first.')
         return 0
 
+    output_dir = getattr(args, 'output', None) or '.'
+    os.makedirs(output_dir, exist_ok=True)
+
     print(f'Found {len(drawings)} drawing(s):')
     for drawing in sorted(drawings, key=lambda d: d.timestamp):
         ts = drawing.timestamp
         t = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(ts))
         json_data = drawing.to_json()
 
-        outfile = f'drawing_{ts}.json'
+        outfile = os.path.join(output_dir, f'drawing_{ts}.json')
         with open(outfile, 'w') as f:
             f.write(json_data)
         print(f'  Saved: {outfile} ({t})')
@@ -250,7 +257,7 @@ def cmd_fetch(args):
             try:
                 from tuhi.export_win import JsonSvg
                 parsed = json.loads(json_data)
-                svg_file = f'drawing_{ts}.svg'
+                svg_file = os.path.join(output_dir, f'drawing_{ts}.svg')
                 orientation = getattr(args, 'orientation', None) or 'landscape'
                 JsonSvg(parsed, orientation, svg_file)
                 print(f'  SVG:   {svg_file}')
@@ -300,12 +307,22 @@ def main():
                              'reverse-landscape', 'reverse-portrait'],
                     default='landscape',
                     help='Drawing orientation for SVG export')
+    sp.add_argument('--output', '-o', default='.', metavar='DIR',
+                    help='Output directory for exported files (default: current directory)')
 
     # live
     sp = sub.add_parser('live', help='Stream live pen data from a registered device')
     sp.add_argument('address', help='Bluetooth address (XX:XX:XX:XX:XX:XX)')
     sp.add_argument('--svg', action='store_true', help='Also write an SVG alongside the JSON')
-    sp.add_argument('--output', default='.', help='Output directory (default: current dir)')
+    sp.add_argument('--orientation',
+                    choices=['landscape', 'portrait',
+                             'reverse-landscape', 'reverse-portrait'],
+                    default='portrait',
+                    help='Drawing orientation for SVG export (default: portrait)')
+    sp.add_argument('--output', '-o', default='.', metavar='DIR',
+                    help='Output directory for exported files (default: current directory)')
+    sp.add_argument('--pressure-threshold', type=int, default=0, metavar='PCT',
+                    help='Drop pen points with pressure below PCT%% of max (0-50, default 0)')
 
     args = parser.parse_args()
 
