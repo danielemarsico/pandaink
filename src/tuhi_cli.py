@@ -183,7 +183,10 @@ def cmd_live(args):
                 drawing.current_stroke.seal()
                 print('|', end='', flush=True)
 
-    app.start_live(address, on_pen_point=on_pen_point,
+    def on_button_press():
+        print('\nclick!', flush=True)
+
+    app.start_live(address, on_pen_point=on_pen_point, on_button_press=on_button_press,
                    pressure_threshold_pct=args.pressure_threshold)
 
     try:
