@@ -333,8 +333,11 @@ class TuhiGUIApp(tk.Tk):
         self._live_running = False
         self._buttons = {}            # name -> widget, for enable/disable
         self._shown_timestamps = set()  # timestamps already present in Notebook
+        self._live_raw_strokes = []         # complete strokes from current live session
+        self._live_current_raw_stroke = []  # in-progress stroke (raw device coords)
 
         self._build_ui()
+        self._set_app_icon()
         self._load_registered_device()
         self.protocol('WM_DELETE_WINDOW', self._on_close)
 
@@ -723,27 +726,99 @@ class TuhiGUIApp(tk.Tk):
                 break
 
         self._live_canvas.clear()
+        self._live_raw_strokes = []
+        self._live_current_raw_stroke = []
         self._live_running = True
         self._buttons['live'].configure(text='Stop Live')
         self._set_status('Live mode active…')
 
         def on_pen_point(x, y, pressure, in_proximity):
+            if in_proximity:
+                self._live_current_raw_stroke.append((x, y, pressure))
+            else:
+                if self._live_current_raw_stroke:
+                    self._live_raw_strokes.append(list(self._live_current_raw_stroke))
+                    self._live_current_raw_stroke = []
             self.after(0, lambda: self._live_canvas.on_pen_point(
                 x, y, pressure, in_proximity))
 
+        def on_button_press():
+            self.after(0, self._show_device_button_toast)
+
         self._app.start_live(self._address, on_pen_point=on_pen_point,
+                             on_button_press=on_button_press,
                              pressure_threshold_pct=self._pressure_threshold.get())
 
     def _stop_live(self):
+        # Seal any in-progress stroke before stopping
+        if self._live_current_raw_stroke:
+            self._live_raw_strokes.append(list(self._live_current_raw_stroke))
+            self._live_current_raw_stroke = []
+
         if self._address:
             self._app.stop_live(self._address)
         self._live_running = False
         self._buttons['live'].configure(text='Start Live')
-        self._set_status('Live mode stopped.')
+
+        if self._live_raw_strokes:
+            self._save_live_session_as_drawing()
+        else:
+            self._set_status('Live mode stopped.')
 
     # ------------------------------------------------------------------ #
     # Helpers                                                             #
     # ------------------------------------------------------------------ #
+
+    def _save_live_session_as_drawing(self):
+        import time as _time
+        from tuhi.drawing_win import Drawing
+
+        dims = self._live_canvas._dims
+        device_name = self._address
+        for d in self._app.list_devices():
+            if d['address'] == self._address:
+                device_name = d.get('name') or self._address
+                break
+
+        timestamp = int(_time.time())
+        drawing = Drawing(device_name, dims, timestamp)
+        for raw_stroke in self._live_raw_strokes:
+            stroke = drawing.new_stroke()
+            for x, y, pressure in raw_stroke:
+                stroke.new_abs(position=(x, y), pressure=pressure)
+        drawing.seal()
+        self._live_raw_strokes = []
+
+        if not drawing.strokes:
+            self._set_status('Live mode stopped.')
+            return
+
+        self._app.config.store_drawing(self._address, drawing)
+
+        # Switch to Normal mode and open the saved drawing as a tab
+        self._mode.set('normal')
+        self._on_mode_changed()
+        self._add_drawing_tab(drawing)
+        self._set_status(f'Live session saved ({len(drawing.strokes)} stroke(s)).')
+
+    def _show_device_button_toast(self):
+        self._set_status('Device button pressed!')
+        if self._live_running:
+            self.after(3000, lambda: self._set_status('Live mode active…')
+                       if self._live_running else None)
+
+    def _set_app_icon(self):
+        try:
+            from PIL import Image, ImageDraw, ImageTk
+            img = Image.new('RGB', (64, 64), (30, 58, 95))
+            draw = ImageDraw.Draw(img)
+            # Ink-drop shape: diamond with a hollow centre dot
+            draw.polygon([(32, 6), (48, 38), (32, 58), (16, 38)], fill=(255, 255, 255))
+            draw.ellipse([27, 28, 37, 38], fill=(30, 58, 95))
+            self._app_icon = ImageTk.PhotoImage(img)
+            self.wm_iconphoto(True, self._app_icon)
+        except Exception:
+            pass
 
     def _set_status(self, msg):
         self._status.set(msg)

@@ -46,6 +46,7 @@ class AppDevice(Object):
         'register-requested': (1, None, ()),
         'button-press-required': (1, None, ()),
         'live-pen-data': (1, None, (TYPE_INT, TYPE_INT, TYPE_INT, TYPE_BOOLEAN)),
+        'live-button-press': (1, None, ()),
     }
 
     def __init__(self):
@@ -268,7 +269,7 @@ class TuhiApp:
         if not any(dev.listening for dev in self._app_devices.values()):
             self.bluez.stop_discovery()
 
-    def start_live(self, address, on_pen_point=None, pressure_threshold_pct=0):
+    def start_live(self, address, on_pen_point=None, on_button_press=None, pressure_threshold_pct=0):
         """
         Start live pen streaming for *address*.  Non-blocking.
 
@@ -293,6 +294,9 @@ class TuhiApp:
         if on_pen_point:
             app_dev.connect('live-pen-data',
                             lambda dev, x, y, p, inp: on_pen_point(x, y, p, inp))
+
+        if on_button_press:
+            app_dev.connect('live-button-press', lambda dev: on_button_press())
 
         app_dev.live = True
         self.bluez.start_discovery()

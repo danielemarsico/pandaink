@@ -316,6 +316,7 @@ class WacomProtocolBase(WacomProtocolLowLevelComm):
         'drawing': (1, None, (TYPE_PYOBJECT,)),
         'battery-status': (1, None, (TYPE_INT, TYPE_BOOLEAN)),
         'live-pen-data': (1, None, (TYPE_INT, TYPE_INT, TYPE_INT, TYPE_BOOLEAN)),
+        'live-button-press': (1, None, ()),
     }
 
     def __init__(self, device, uuid, protocol_version=ProtocolVersion.ANY):
@@ -345,6 +346,8 @@ class WacomProtocolBase(WacomProtocolLowLevelComm):
             pressure = int.from_bytes(value[2:4], byteorder='little')
             buttons = int(value[10])
             logger.debug(f'New Pen Data: pressure: {pressure}, button: {buttons}')
+            if buttons:
+                self.emit('live-button-press')
         elif value[0] == 0xa2:
             length = value[1]
             timestamp = int.from_bytes(value[4:], byteorder='little') * 5
@@ -723,6 +726,7 @@ class WacomDevice(Object):
         'button-press-required': (1, None, ()),
         'battery-status': (1, None, (TYPE_INT, TYPE_BOOLEAN)),
         'live-pen-data': (1, None, (TYPE_INT, TYPE_INT, TYPE_INT, TYPE_BOOLEAN)),
+        'live-button-press': (1, None, ()),
     }
 
     def __init__(self, device, config=None):
@@ -770,6 +774,10 @@ class WacomDevice(Object):
         self._wacom_protocol.connect(
             'live-pen-data',
             lambda prot, x, y, pressure, in_proximity, self: self.emit('live-pen-data', x, y, pressure, in_proximity),
+            self)
+        self._wacom_protocol.connect(
+            'live-button-press',
+            lambda prot, self: self.emit('live-button-press'),
             self)
         self._wacom_protocol.connect('notify::dimensions', self._on_dimensions)
 

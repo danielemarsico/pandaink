@@ -182,6 +182,10 @@ class TuhiDevice(Object):
                     'live-pen-data',
                     lambda wdev, x, y, p, inp, ddev: ddev.emit('live-pen-data', x, y, p, inp),
                     self._tuhi_dbus_device)
+                self._wacom_device.connect(
+                    'live-button-press',
+                    lambda wdev, ddev: ddev.emit('live-button-press'),
+                    self._tuhi_dbus_device)
                 self._live_signal_connected = True
             pct = getattr(self._tuhi_dbus_device, 'pressure_threshold_pct', 0)
             self._wacom_device.start_live(self._tuhi_dbus_device.uhid_fd, pct)

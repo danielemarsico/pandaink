@@ -80,9 +80,9 @@ All work goes in `docs/` (not `web/` — that directory should be deleted, see H
 
 ## Sprint 2 ##
 
-- [ ] **S2-1 Live → Save as Drawing tab**: When the user clicks Stop Live, if strokes were recorded, automatically save the live session as a drawing and open it as a new tab in Normal mode (same tab UI as synced drawings, with Save SVG / Delete). Clicking Start Live again opens a fresh canvas. If no strokes, just stop silently.
+- [X] **S2-1 Live → Save as Drawing tab**: When the user clicks Stop Live, if strokes were recorded, automatically save the live session as a drawing and open it as a new tab in Normal mode (same tab UI as synced drawings, with Save SVG / Delete). Clicking Start Live again opens a fresh canvas. If no strokes, just stop silently.
 
-- [ ] **S2-2 Device button intercept in live mode**: When the device button is pressed during live streaming, surface it to the user. GUI: show a non-blocking alert/toast ("Device button pressed!"). CLI: print "click!" to stdout. The raw signal already arrives via the `0x10` packet in `_on_pen_data_changed` (buttons byte at value[10]); wire it up to a new `live-button-press` signal on `WacomProtocolBase` and propagate through `WacomDevice` → `AppDevice` → GUI/CLI callback.
+- [X] **S2-2 Device button intercept in live mode**: When the device button is pressed during live streaming, surface it to the user. GUI: show a non-blocking alert/toast ("Device button pressed!"). CLI: print "click!" to stdout. The raw signal already arrives via the `0x10` packet in `_on_pen_data_changed` (buttons byte at value[10]); wire it up to a new `live-button-press` signal on `WacomProtocolBase` and propagate through `WacomDevice` → `AppDevice` → GUI/CLI callback.
 
 - [ ] **S2-3 (Research only — no implementation) Stroke segmentation in live mode**: Decide how to detect when a stroke is finished. Options:
   - **Pen-left-proximity event** (0xff×6 packet): device already sends this when pen lifts far enough — most reliable, zero latency, already handled (`in_proximity=False`). Current code already seals strokes on this. Works well for normal writing.
@@ -90,7 +90,7 @@ All work goes in `docs/` (not `web/` — that directory should be deleted, see H
   - **Velocity / direction change**: detect sharp angle changes or deceleration as stroke-end heuristic. Complex to tune, device-dependent.
   - **Recommendation**: rely on the existing proximity event as the primary signal; add a 200 ms pressure-drop timeout as a fallback for devices that don't reliably send 0xff packets.
 
-  - [ ] **S2-4 make web search on he discontiuation of wacom cloud and sdk for bamboo folio and slate. add in the project web page a sort of discalimer, sayin we are the solution for the orphans of wacom cloud and sdk for bamboo!
+  - [X] **S2-4 make web search on he discontiuation of wacom cloud and sdk for bamboo folio and slate. add in the project web page a sort of discalimer, sayin we are the solution for the orphans of wacom cloud and sdk for bamboo!
 
-  - [ ] **S2-5 provide details on how to add windows app icon, and icons to the gui application. the same for the web app!
+  - [X] **S2-5 provide details on how to add windows app icon, and icons to the gui application. the same for the web app!
    

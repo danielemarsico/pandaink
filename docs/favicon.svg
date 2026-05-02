@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <rect width="32" height="32" rx="5" fill="#1e3a5f"/>
+  <!-- ink-drop body -->
+  <polygon points="16,4 24,20 16,28 8,20" fill="#ffffff"/>
+  <!-- hollow centre to give "ink nib" feel -->
+  <ellipse cx="16" cy="19" rx="3.5" ry="3.5" fill="#1e3a5f"/>
+</svg>
