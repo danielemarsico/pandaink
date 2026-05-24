@@ -44,10 +44,17 @@ function hexToBytes(hex) {
     return new Uint8Array(bytes);
 }
 
-function waitForNotification(bleManager, timeoutMs = 15000) {
+// accept: optional predicate (DataView) => bool. When provided, intermediate
+// notifications that fail the predicate are silently skipped so callers can
+// filter out ACKs without losing the real reply.
+function waitForNotification(bleManager, timeoutMs = 15000, accept = null) {
     return new Promise((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error('Timed out waiting for device reply')), timeoutMs);
+        const timer = setTimeout(() => {
+            bleManager.stopNotify(NORDIC_UART_CHRC_RX_UUID).catch(() => {});
+            reject(new Error('Timed out waiting for device reply'));
+        }, timeoutMs);
         bleManager.startNotify(NORDIC_UART_CHRC_RX_UUID, (dataView) => {
+            if (accept && !accept(dataView)) return; // skip, keep listening
             clearTimeout(timer);
             bleManager.stopNotify(NORDIC_UART_CHRC_RX_UUID).catch(() => {});
             resolve(dataView);
@@ -97,8 +104,13 @@ export async function registerDevice(bleManager) {
         await bleManager.writeCharacteristic(NORDIC_UART_CHRC_TX_UUID, pressPkt);
     }
 
-    // Wait for the user to press the physical button on the device (up to 30 s)
-    const buttonReply = await waitForNotification(bleManager, 30000);
+    // Wait for the user to press the physical button on the device (up to 30 s).
+    // The device sends an ACK (0xb3) first to confirm receipt of REGISTER_PRESS;
+    // skip it and keep waiting for the real registration reply.
+    const buttonReply = await waitForNotification(bleManager, 30000, (dv) => {
+        const op = dv.getUint8(0);
+        return op === REPLY_REGISTER_WAIT || op === REPLY_REGISTER_INTUOS_PRO;
+    });
     const replyOpcode = buttonReply.getUint8(0);
 
     let protocolVersion;
