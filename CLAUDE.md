@@ -1,3 +1,11 @@
+## Commit Rules
+
+Before every `git commit` (and before pushing), update `CHANGELOG.md`:
+- Add an entry under the `## Unreleased` section describing what changed and why.
+- Format: `- <type>: <short description>` (types: `feat`, `fix`, `chore`, `docs`, `refactor`).
+- Keep entries user-facing where possible; skip internal-only reformats.
+- On a version tag (`v*`), move all `## Unreleased` entries under a new `## <version> — <date>` heading.
+
 ## Autonomous Mode 
 - TODO list lives in `.claude/tasks/current.md` 
 - Log progress to `.claude/tasks/PROGRESS.md`
