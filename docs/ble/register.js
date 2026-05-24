@@ -128,7 +128,7 @@ export async function registerDevice(bleManager) {
     }
 
     const result = {
-        address: bleManager._device.id,
+        id: bleManager._device.id,
         name: bleManager._device.name,
         uuid,
         protocol: protocolVersion,
