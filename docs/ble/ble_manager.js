@@ -81,7 +81,23 @@ export class BleManager {
 
     async writeCharacteristic(uuid, data) {
         const char = await this._getCharacteristic(uuid);
-        await char.writeValue(data);
+        // Python bleak uses response=False (write-without-response); match that.
+        // Fall back to write-with-response if the characteristic requires it.
+        if (char.properties.writeWithoutResponse) {
+            await char.writeValueWithoutResponse(data);
+        } else {
+            await char.writeValueWithResponse(data);
+        }
+    }
+
+    // Returns true if the connected device exposes the given GATT service UUID.
+    async hasService(serviceUuid) {
+        try {
+            await this._server.getPrimaryService(serviceUuid);
+            return true;
+        } catch {
+            return false;
+        }
     }
 
     async startNotify(uuid, callback) {

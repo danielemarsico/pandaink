@@ -13,7 +13,7 @@ import {
     PROTOCOL_SPARK,
     PROTOCOL_SLATE,
     PROTOCOL_INTUOS_PRO,
-    SYSEVENT_NOTIFICATION_CHRC_UUID,
+    SYSEVENT_NOTIFICATION_SERVICE_UUID,
 } from './protocol_constants.js';
 
 const STORAGE_KEY = 'pandaink_device';
@@ -62,16 +62,10 @@ function waitForNotification(bleManager, timeoutMs = 15000, accept = null) {
     });
 }
 
-// Determines if device is Spark (no SYSEVENT characteristic) or Slate/IntuosPro.
-// Web Bluetooth doesn't enumerate all characteristics upfront, so we attempt
-// to get the SYSEVENT characteristic and treat failure as Spark.
+// Determines if device is Spark (no SYSEVENT service) or Slate/IntuosPro.
+// Spark devices lack the SYSEVENT_NOTIFICATION_SERVICE entirely.
 async function isSpark(bleManager) {
-    try {
-        await bleManager._getCharacteristic(SYSEVENT_NOTIFICATION_CHRC_UUID);
-        return false;
-    } catch {
-        return true;
-    }
+    return !(await bleManager.hasService(SYSEVENT_NOTIFICATION_SERVICE_UUID));
 }
 
 export async function registerDevice(bleManager) {
