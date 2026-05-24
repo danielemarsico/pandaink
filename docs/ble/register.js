@@ -16,8 +16,6 @@ import {
     SYSEVENT_NOTIFICATION_SERVICE_UUID,
 } from './protocol_constants.js';
 
-const STORAGE_KEY = 'pandaink_device';
-
 function buildNordicPacket(opcode, args) {
     const data = new Uint8Array(2 + args.length);
     data[0] = opcode;
@@ -27,13 +25,9 @@ function buildNordicPacket(opcode, args) {
 }
 
 function generateUuid() {
-    const stored = localStorage.getItem('pandaink_uuid');
-    if (stored && stored.length === 12) return stored;
-    const hex = Array.from(crypto.getRandomValues(new Uint8Array(6)))
+    return Array.from(crypto.getRandomValues(new Uint8Array(6)))
         .map(b => b.toString(16).padStart(2, '0'))
         .join('');
-    localStorage.setItem('pandaink_uuid', hex);
-    return hex;
 }
 
 function hexToBytes(hex) {
@@ -69,12 +63,6 @@ async function isSpark(bleManager) {
 }
 
 export async function registerDevice(bleManager) {
-    const existingRaw = localStorage.getItem(STORAGE_KEY);
-    if (existingRaw) {
-        const existing = JSON.parse(existingRaw);
-        return existing;
-    }
-
     const uuid = generateUuid();
     const uuidBytes = hexToBytes(uuid);
 
@@ -127,12 +115,10 @@ export async function registerDevice(bleManager) {
         }
     }
 
-    const result = {
-        id: bleManager._device.id,
-        name: bleManager._device.name,
+    // Return raw BLE info; caller (app_controller) persists to Supabase.
+    return {
+        name:     bleManager._device.name,
         uuid,
         protocol: protocolVersion,
     };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(result));
-    return result;
 }

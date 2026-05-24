@@ -7,6 +7,14 @@ Format: `## Unreleased` for pending changes; `## <version> — <date>` for relea
 
 ## Unreleased
 
+- feat: Supabase auth — email+password, Google login, GitHub login; auth panel shown when logged out
+- feat: profile settings panel — account info, cloud storage connection, device management
+- feat: Google Drive PKCE OAuth — connect Drive in Profile Settings, tokens stored in Supabase
+- feat: drawings stored in Google Drive appDataFolder (one JSON file per drawing)
+- feat: device config (wacom_uuid + protocol) stored in Supabase — enables cross-computer reconnect
+- feat: auth toolbar row — avatar, email, Profile button, Sign out
+- refactor: register.js removes localStorage dependency; Supabase is now authoritative for device config
+- chore: Supabase migration SQL (001_init.sql) with profiles, devices, storage_tokens tables + RLS
 - feat: show build commit + timestamp in web app footer (auto-stamped by CI)
 - fix: web BLE device picker now uses `acceptAllDevices` so registered devices appear regardless of advertised services
 - fix: web BLE registration skips intermediate ACK (0xb3) when waiting for REGISTER_WAIT reply

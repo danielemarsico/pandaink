@@ -6,6 +6,14 @@
   <title>PandaInk — Web App</title>
   <link rel="stylesheet" href="style.css">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <!-- Supabase JS SDK (ESM via CDN — imported by auth modules) -->
+  <script type="importmap">
+  {
+    "imports": {
+      "@supabase/supabase-js": "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm"
+    }
+  }
+  </script>
 </head>
 <body>
 
