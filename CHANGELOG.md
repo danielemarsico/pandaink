@@ -7,6 +7,10 @@ Format: `## Unreleased` for pending changes; `## <version> — <date>` for relea
 
 ## Unreleased
 
+- docs: update README with web app features, auth/cloud architecture, and full external setup instructions (Supabase, Google Cloud, GitHub OAuth)
+- chore: consolidate remaining tasks into single .claude/tasks/current.md (Windows App + Web App sections); remove completed/stale plan files
+- chore: move CLAUDE.md to .claude/CLAUDE.md; add Windows App and Web App architecture sections
+
 - feat: Supabase auth — email+password, Google login, GitHub login; auth panel shown when logged out
 - feat: profile settings panel — account info, cloud storage connection, device management
 - feat: Google Drive PKCE OAuth — connect Drive in Profile Settings, tokens stored in Supabase

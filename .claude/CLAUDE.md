@@ -6,10 +6,8 @@ Before every `git commit` (and before pushing), update `CHANGELOG.md`:
 - Keep entries user-facing where possible; skip internal-only reformats.
 - On a version tag (`v*`), move all `## Unreleased` entries under a new `## <version> — <date>` heading.
 
-## Autonomous Mode 
-- TODO list lives in `.claude/tasks/current.md` 
-- Log progress to `.claude/tasks/PROGRESS.md`
-- Strategic plan: `.claude/virtual-weaving-sunbeam.md`
+## Autonomous Mode
+- TODO list lives in `.claude/tasks/current.md`
 
 ## Project Layout
 
@@ -118,3 +116,102 @@ pandaink/
   - `[Delete]` — permanently delete the drawing file from disk and close the tab.
 - **Live mode**: Start Live → streams real-time pen strokes into LiveCanvas.
   One fullscreen canvas, no tabs.
+
+---
+
+## Architecture — Windows App
+
+Single-process Python application. No daemon, no IPC sockets.
+
+```
+tuhi_gui.py / tuhi_cli.py
+        │
+        ▼
+   TuhiApp (src/tuhi/app.py)          — orchestrator; owns config + BLE loop
+        │
+        ├── TuhiConfig (config_win.py) — settings.ini + drawing JSON in %APPDATA%\pandaink\
+        ├── TuhiDevice (base_win.py)   — BLE device lifecycle, signals
+        │       └── BleakBLEDevice (ble_bleak.py)  — async BLE via bleak
+        │               └── WacomDevice (wacom_win.py) — full Wacom BLE protocol
+        └── AppDevice (app.py)         — in-process device state (signals, drawing accumulator)
+
+Drawing flow:
+  BLE notify → WacomDevice._on_pen_data_changed()
+             → AppDevice.emit('drawing-finished' | 'live-pen-data')
+             → TuhiGUIApp callback → DrawingCanvas / LiveCanvas
+             → TuhiConfig.save_drawing() → %APPDATA%\pandaink\<timestamp>.json
+
+Export flow:
+  DrawingCanvas → [Save SVG] → JsonSvg (export_win.py) → file dialog → .svg
+               → [Save SVG ▾] → cloud_export.py → Google Drive / Dropbox / OneDrive (OAuth2)
+```
+
+Key design decisions:
+- Asyncio event loop runs in a background thread; GUI callbacks post back via `root.after(0, ...)`.
+- `gobject_compat.py` provides a minimal GObject signal shim so protocol code from Linux Tuhi works unchanged.
+- Cloud export tokens stored in `%APPDATA%\pandaink\cloud_tokens.json` (separate from drawings).
+
+---
+
+## Architecture — Web App
+
+Fully static frontend (GitHub Pages) + managed backend services. No custom server.
+
+```
+Browser
+  │
+  ├── docs/app.html + docs/style.css      — app shell, importmap for Supabase JS SDK
+  ├── docs/app.js                         — entry point, mounts AppController
+  │
+  ├── docs/ui/app_controller.js           — UI state machine (auth gate, Normal/Live modes)
+  ├── docs/ui/profile_panel.js            — slide-in drawer: account, Drive, device
+  ├── docs/ui/drawing_canvas.js           — Canvas 2D rendering, orientation transforms
+  ├── docs/ui/live_canvas.js              — real-time stroke rendering
+  │
+  ├── docs/ble/
+  │   ├── ble_manager.js                  — Web Bluetooth API wrapper (connect/read/write/notify)
+  │   ├── protocol_constants.js           — GATT UUIDs, opcodes (port of protocol.py)
+  │   ├── register.js                     — BLE registration flow (PKCE-style challenge/reply)
+  │   ├── sync.js                         — offline drawing sync (retrieve_data port)
+  │   └── live.js                         — live pen streaming (start_live port)
+  │
+  ├── docs/auth/
+  │   ├── supabase_client.js              — Supabase JS singleton (SUPABASE_URL + SUPABASE_ANON_KEY)
+  │   ├── auth_manager.js                 — sign up/in/out, profile CRUD, device CRUD
+  │   └── storage_oauth.js               — Google Drive PKCE OAuth (GDRIVE_CLIENT_ID)
+  │
+  ├── docs/storage/
+  │   └── gdrive_store.js                 — Google Drive REST API v3 (appDataFolder)
+  │
+  └── docs/export/
+      └── svg_export.js                   — SVG string generation + Blob download
+
+External services:
+  ├── Supabase (supabase.com)
+  │   ├── Auth — email/password, Google OAuth, GitHub OAuth
+  │   ├── profiles table — display_name, storage_provider
+  │   ├── devices table  — wacom_uuid, protocol, device_name per user
+  │   └── storage_tokens table — Google Drive access/refresh tokens per user
+  │
+  └── Google Drive (googleapis.com)
+      └── appDataFolder — drawing_<timestamp>.json files (hidden, app-private)
+```
+
+Auth flow:
+```
+page load → supabase.auth.getSession()
+          → no session: show auth panel (email form + Google + GitHub buttons)
+          → session found: loadDevice(userId) from Supabase → mount app
+```
+
+Drawing save flow:
+```
+BLE sync → stroke data → gdrive_store.saveDrawing()
+         → getValidAccessToken() (refresh via Supabase storage_tokens if needed)
+         → POST /upload/drive/v3/files (multipart, appDataFolder)
+         → drawing_<timestamp>.json stored in user's Drive
+```
+
+Key credentials (must be filled in by developer/owner):
+- `docs/auth/supabase_client.js` lines 12–13 — `SUPABASE_URL`, `SUPABASE_ANON_KEY`
+- `docs/auth/storage_oauth.js` line 14 — `GDRIVE_CLIENT_ID`
