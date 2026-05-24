@@ -1,4 +1,13 @@
-import { NORDIC_UART_SERVICE_UUID } from './protocol_constants.js';
+import {
+    NORDIC_UART_SERVICE_UUID,
+    WACOM_OFFLINE_SERVICE_UUID,
+    WACOM_LIVE_SERVICE_UUID,
+    SYSEVENT_NOTIFICATION_SERVICE_UUID,
+} from './protocol_constants.js';
+
+// Wacom manufacturer company IDs (matches WACOM_COMPANY_IDS in app.py).
+// The device advertises these in pairing mode instead of service UUIDs.
+const WACOM_COMPANY_IDS = [0x4755, 0x4157, 0x424d];
 
 export class BleManager {
     constructor() {
@@ -13,12 +22,24 @@ export class BleManager {
 
     async connect() {
         this._device = await navigator.bluetooth.requestDevice({
-            filters: [{ services: [NORDIC_UART_SERVICE_UUID] }],
+            // Web Bluetooth uses OR logic across filters[].
+            // In pairing mode the Bamboo Folio may not advertise the Nordic
+            // UART service, so we match on all known Wacom service UUIDs and
+            // on manufacturer company IDs (same set the Python app uses).
+            filters: [
+                { services: [NORDIC_UART_SERVICE_UUID] },
+                { services: [WACOM_OFFLINE_SERVICE_UUID] },
+                { services: [WACOM_LIVE_SERVICE_UUID] },
+                { services: [SYSEVENT_NOTIFICATION_SERVICE_UUID] },
+                ...WACOM_COMPANY_IDS.map(id => ({
+                    manufacturerData: [{ companyIdentifier: id }],
+                })),
+            ],
             optionalServices: [
-                '6e400001-b5a3-f393-e0a9-e50e24dcca9e',
-                'ffee0001-bbaa-9988-7766-554433221100',
-                '00001523-1212-efde-1523-785feabcd123',
-                '3a340720-c572-11e5-86c5-0002a5d5c51b',
+                NORDIC_UART_SERVICE_UUID,
+                WACOM_OFFLINE_SERVICE_UUID,
+                WACOM_LIVE_SERVICE_UUID,
+                SYSEVENT_NOTIFICATION_SERVICE_UUID,
             ],
         });
 
