@@ -22,19 +22,10 @@ export class BleManager {
 
     async connect() {
         this._device = await navigator.bluetooth.requestDevice({
-            // Web Bluetooth uses OR logic across filters[].
-            // In pairing mode the Bamboo Folio may not advertise the Nordic
-            // UART service, so we match on all known Wacom service UUIDs and
-            // on manufacturer company IDs (same set the Python app uses).
-            filters: [
-                { services: [NORDIC_UART_SERVICE_UUID] },
-                { services: [WACOM_OFFLINE_SERVICE_UUID] },
-                { services: [WACOM_LIVE_SERVICE_UUID] },
-                { services: [SYSEVENT_NOTIFICATION_SERVICE_UUID] },
-                ...WACOM_COMPANY_IDS.map(id => ({
-                    manufacturerData: [{ companyIdentifier: id }],
-                })),
-            ],
+            // acceptAllDevices shows every device the browser can see so the
+            // user can pick their tablet regardless of which service UUIDs it
+            // happens to be advertising at connection time.
+            acceptAllDevices: true,
             optionalServices: [
                 NORDIC_UART_SERVICE_UUID,
                 WACOM_OFFLINE_SERVICE_UUID,
