@@ -43,6 +43,7 @@
   <footer>
     <div class="container">
       <span>PandaInk — GPLv2</span>
+      <span id="build-info" style="opacity:0.5;font-size:0.85em"></span>
       <div class="footer-links">
         <a href="https://github.com/tuhiproject/tuhi" target="_blank" rel="noopener">Based on Tuhi</a>
         <a href="https://github.com/danielemarsico/pandaink" target="_blank" rel="noopener">GitHub</a>
@@ -51,5 +52,12 @@
   </footer>
 
   <script type="module" src="app.js"></script>
+  <script>
+    fetch('./version.json').then(r => r.json()).then(({ commit, time }) => {
+      const t = new Date(time);
+      document.getElementById('build-info').textContent =
+        commit + ' · ' + t.toLocaleString();
+    }).catch(() => {});
+  </script>
 </body>
 </html>
