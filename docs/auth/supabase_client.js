@@ -8,8 +8,8 @@
 
 import { createClient } from '@supabase/supabase-js';
 
-const SUPABASE_URL      = 'https://YOUR_PROJECT_ID.supabase.co';
-const SUPABASE_ANON_KEY = 'YOUR_ANON_KEY';
+const SUPABASE_URL      = 'https://qqsbcovjvhmpypzglbyq.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFxc2Jjb3ZqdmhtcHlwemdsYnlxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM0MzY0NDMsImV4cCI6MjA5OTAxMjQ0M30.I7AaGbxXH0J3UiBulyw6hVRGnY4Jcg6H2QY_BKl-ySI';
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     auth: {

@@ -13,7 +13,7 @@ const PRESSURE_FACTOR  = 0.2;
 export class DrawingCanvas {
     /**
      * @param {HTMLCanvasElement} el         - The target <canvas> element.
-     * @param {object}           drawing     - Drawing record from idb_store: { dimensions, strokes }
+     * @param {object}           drawing     - Drawing record from gdrive_store: { dimensions, strokes }
      * @param {string}           orientation - 'portrait' | 'landscape'
      */
     constructor(el, drawing, orientation = 'portrait') {

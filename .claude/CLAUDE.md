@@ -181,7 +181,8 @@ Browser
   │   └── storage_oauth.js               — Google Drive PKCE OAuth (GDRIVE_CLIENT_ID)
   │
   ├── docs/storage/
-  │   └── gdrive_store.js                 — Google Drive REST API v3 (appDataFolder)
+  │   ├── gdrive_store.js                 — Google Drive REST API v3 (appDataFolder); wired into app_controller.js
+  │   └── idb_store.js                    — IndexedDB CRUD (unused/legacy — pre-Drive local-storage design, not imported anywhere)
   │
   └── docs/export/
       └── svg_export.js                   — SVG string generation + Blob download

@@ -7,6 +7,8 @@ Format: `## Unreleased` for pending changes; `## <version> — <date>` for relea
 
 ## Unreleased
 
+- chore: fill in live Supabase project URL and anon key in `docs/auth/supabase_client.js`, enabling auth on the deployed web app
+- docs: document `docs/storage/idb_store.js` as unused/legacy in CLAUDE.md architecture; fix stale `idb_store` reference in a `drawing_canvas.js` comment
 - docs: update README with web app features, auth/cloud architecture, and full external setup instructions (Supabase, Google Cloud, GitHub OAuth)
 - chore: consolidate remaining tasks into single .claude/tasks/current.md (Windows App + Web App sections); remove completed/stale plan files
 - chore: move CLAUDE.md to .claude/CLAUDE.md; add Windows App and Web App architecture sections
