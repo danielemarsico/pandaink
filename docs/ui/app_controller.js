@@ -408,7 +408,7 @@ export class AppController {
                 return;
             }
 
-            const drawings = await syncDrawings(this._ble, this._deviceInfo, {
+            const { drawings, dimensions } = await syncDrawings(this._ble, this._deviceInfo, {
                 onProgress: (done, total) => this._setStatus(`Syncing ${done}/${total}…`),
             });
 
@@ -416,7 +416,7 @@ export class AppController {
                 const record = {
                     deviceId:   this._deviceInfo.id,
                     timestamp:  d.timestamp,
-                    dimensions: this._deviceInfo.dimensions || [21000, 14800],
+                    dimensions,
                     strokes:    d.strokes,
                 };
                 await saveDrawing(record);

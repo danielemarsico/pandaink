@@ -2,9 +2,10 @@
 // Ports WacomProtocolBase.retrieve_data() / read_offline_data() from wacom_win.py.
 //
 // Usage:
-//   const drawings = await syncDrawings(bleManager, deviceInfo);
-//   // drawings: array of { timestamp, dimensions, strokes }
-//   // strokes:  array of arrays of { x, y, p } (absolute device units)
+//   const { drawings, dimensions } = await syncDrawings(bleManager, deviceInfo);
+//   // drawings:   array of { timestamp, strokes }
+//   // dimensions: [width, height] in µm
+//   // strokes:    array of arrays of { x, y, p } (absolute device units)
 
 import {
     NORDIC_UART_CHRC_TX_UUID,
@@ -12,6 +13,8 @@ import {
     WACOM_OFFLINE_CHRC_PEN_DATA_UUID,
     OPCODE_SET_MODE,
     OPCODE_CONNECT,
+    OPCODE_SET_TIME,
+    OPCODE_GET_FIRMWARE,
     OPCODE_AVAILABLE_FILES,
     OPCODE_GET_STROKES,
     OPCODE_DOWNLOAD_OLDEST,
@@ -23,6 +26,9 @@ import {
     REPLY_GET_STROKES_COUNT,
     REPLY_GET_STROKES_TS,
     REPLY_GET_STROKES,
+    REPLY_GET_BATTERY,
+    REPLY_GET_FIRMWARE,
+    REPLY_GET_DIMENSIONS,
     REPLY_CRC,
     REPLY_ACK,
     REPLY_CONNECT_OK,
@@ -32,6 +38,11 @@ import {
     FILE_TRANSFER_ARGS,
     PROTOCOL_SPARK,
 } from './protocol_constants.js';
+
+// Hardcoded on Spark/Slate/Folio devices -- there's no real getter for point
+// size on this family (protocol.py's MsgGetPointSizeSpark), only Intuos Pro
+// queries it for real.
+const POINT_SIZE_UM = 10;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Nordic UART packet helpers
@@ -62,6 +73,43 @@ function u32le(dv, offset) {
         | (dv.getUint8(offset + 1) << 8)
         | (dv.getUint8(offset + 2) << 16)
         | (dv.getUint8(offset + 3) << 24)) >>> 0;
+}
+
+// Device timestamps are BCD-encoded: each byte's hex digits are two decimal
+// digits of "YYMMDDHHMMSS" (UTC), ports protocol.py's
+// f'{d:02x}' + time.strptime + calendar.timegm pattern.
+function bcdTimeBytes(date) {
+    const pad2 = (n) => String(n).padStart(2, '0');
+    const str = pad2(date.getUTCFullYear() % 100) + pad2(date.getUTCMonth() + 1)
+        + pad2(date.getUTCDate()) + pad2(date.getUTCHours())
+        + pad2(date.getUTCMinutes()) + pad2(date.getUTCSeconds());
+    return hexBytes(str);
+}
+
+function bcdToTimestamp(bytes) {
+    let str = '';
+    for (const b of bytes) str += b.toString(16).padStart(2, '0');
+    const yy = 2000 + parseInt(str.slice(0, 2), 10);
+    const mm = parseInt(str.slice(2, 4), 10) - 1; // JS months are 0-indexed
+    const dd = parseInt(str.slice(4, 6), 10);
+    const hh = parseInt(str.slice(6, 8), 10);
+    const mi = parseInt(str.slice(8, 10), 10);
+    const ss = parseInt(str.slice(10, 12), 10);
+    return Math.floor(Date.UTC(yy, mm, dd, hh, mi, ss) / 1000);
+}
+
+// Checks a reply that's expected to use the generic ACK format (opcode 0xb3,
+// payload byte 0 is 0x00 on success or a device error code otherwise) --
+// ports protocol.py's Msg.execute() default 0xb3 dispatch.
+function checkAckReply(reply, label) {
+    const opcode = reply.getUint8(0);
+    if (opcode !== REPLY_ACK) {
+        throw new Error(`Unexpected reply to ${label} (opcode 0x${opcode.toString(16)})`);
+    }
+    const status = reply.getUint8(2);
+    if (status !== 0x00) {
+        throw new Error(`Device rejected ${label} (error code 0x${status.toString(16)})`);
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -344,12 +392,17 @@ function parseDelta(data, i, x, y, p, dx, dy, dp) {
  * @param {object}     [opts]
  * @param {boolean}    [opts.deleteAfterSync=true] - Delete each file from device after download.
  * @param {function}   [opts.onProgress]           - Called with (downloadedCount, totalCount).
- * @returns {Promise<Array>} Array of drawing objects { timestamp, strokes }.
+ * @returns {Promise<{drawings: Array, dimensions: [number, number]}>}
+ *          drawings: array of { timestamp, strokes }; dimensions: [width, height] in µm.
  */
 export async function syncDrawings(bleManager, deviceInfo, opts = {}) {
     const { deleteAfterSync = true, onProgress } = opts;
     const { uuid } = deviceInfo;
     const uuidBytes = hexBytes(uuid);
+
+    // The device rejects the file-count query below (and everything after)
+    // with a generic ACK error unless this whole handshake runs first, in
+    // this order -- ports WacomDeviceSlate.retrieve_data() from wacom_win.py.
 
     // 1. Connect / authenticate
     // Most devices (Spark/Slate/Folio) reply with the generic ACK opcode
@@ -372,13 +425,49 @@ export async function syncDrawings(bleManager, deviceInfo, opts = {}) {
         throw new Error(`Unexpected connect reply (opcode 0x${connectOpcode.toString(16)})`);
     }
 
-    // 2. Route offline data to the FFEE0003 GATT characteristic
-    await send(bleManager, OPCODE_SET_FILE_TRANSFER, FILE_TRANSFER_ARGS);
+    // 2. Set device clock to current UTC time
+    const setTimeReply = await exchange(bleManager, OPCODE_SET_TIME, Array.from(bcdTimeBytes(new Date())));
+    checkAckReply(setTimeReply, 'set time');
 
-    // 3. Switch device to paper mode
-    await send(bleManager, OPCODE_SET_MODE, [MODE_PAPER]);
+    // 3. Query battery (result currently unused, but the device expects this
+    // call as part of the handshake before it will honor file operations)
+    const batteryReply = await exchange(bleManager, OPCODE_GET_BATTERY, []);
+    if (batteryReply.getUint8(0) !== REPLY_GET_BATTERY) {
+        throw new Error(`Unexpected battery reply (opcode 0x${batteryReply.getUint8(0).toString(16)})`);
+    }
 
-    // 4. Query available file count
+    // 4. Query tablet dimensions (width=selector 3, height=selector 4);
+    // point size has no real getter on this device family, so it's hardcoded
+    // (matches protocol.py's MsgGetPointSizeSpark).
+    const widthReply  = await exchange(bleManager, OPCODE_GET_DIMENSIONS, [0x03, 0x00]);
+    const heightReply = await exchange(bleManager, OPCODE_GET_DIMENSIONS, [0x04, 0x00]);
+    for (const [reply, label] of [[widthReply, 'width'], [heightReply, 'height']]) {
+        if (reply.getUint8(0) !== REPLY_GET_DIMENSIONS) {
+            throw new Error(`Unexpected ${label} reply (opcode 0x${reply.getUint8(0).toString(16)})`);
+        }
+    }
+    const rawWidth  = u32le(new DataView(widthReply.buffer, widthReply.byteOffset), 4);
+    const rawHeight = u32le(new DataView(heightReply.buffer, heightReply.byteOffset), 4);
+    const dimensions = [rawWidth * POINT_SIZE_UM, rawHeight * POINT_SIZE_UM];
+
+    // 5. Query firmware version (two requests with different selectors;
+    // result currently unused, same handshake-order requirement as above)
+    for (const selector of [0, 1]) {
+        const fwReply = await exchange(bleManager, OPCODE_GET_FIRMWARE, [selector]);
+        if (fwReply.getUint8(0) !== REPLY_GET_FIRMWARE) {
+            throw new Error(`Unexpected firmware reply (opcode 0x${fwReply.getUint8(0).toString(16)})`);
+        }
+    }
+
+    // 6. Route offline data to the FFEE0003 GATT characteristic
+    const fileTransferReply = await exchange(bleManager, OPCODE_SET_FILE_TRANSFER, FILE_TRANSFER_ARGS);
+    checkAckReply(fileTransferReply, 'file transfer setup');
+
+    // 7. Switch device to paper mode
+    const paperModeReply = await exchange(bleManager, OPCODE_SET_MODE, [MODE_PAPER]);
+    checkAckReply(paperModeReply, 'paper mode');
+
+    // 8. Query available file count
     const countReply = await exchange(bleManager, OPCODE_AVAILABLE_FILES, []);
     const fileCount = countReply.getUint8(2) | (countReply.getUint8(3) << 8);
 
@@ -387,17 +476,22 @@ export async function syncDrawings(bleManager, deviceInfo, opts = {}) {
     for (let n = 0; n < fileCount; n++) {
         if (onProgress) onProgress(n, fileCount);
 
-        // 5. Get stroke count + timestamp for oldest file
+        // 9. Get stroke count + timestamp for oldest file. The timestamp is
+        // BCD-encoded (not a raw little-endian integer) -- ports protocol.py's
+        // MsgGetStrokesSlate._handle_reply.
         const strokesReply = await exchange(bleManager, OPCODE_GET_STROKES, []);
-        const strokeCount = u32le(new DataView(strokesReply.buffer, strokesReply.byteOffset), 2);
-        const timestamp   = u32le(new DataView(strokesReply.buffer, strokesReply.byteOffset), 6);
+        const strokesDv    = new DataView(strokesReply.buffer, strokesReply.byteOffset);
+        const strokeCount  = u32le(strokesDv, 2);
+        const timestamp    = bcdToTimestamp(
+            new Uint8Array(strokesReply.buffer, strokesReply.byteOffset + 6, 6)
+        );
 
-        // 6-7. Subscribe, request download of oldest file, and accumulate pen
-        // data chunks until the CRC packet arrives (readOfflinePenData sends
-        // the trigger itself, after subscribing).
+        // 10-11. Subscribe, request download of oldest file, and accumulate
+        // pen data chunks until the CRC packet arrives (readOfflinePenData
+        // sends the trigger itself, after subscribing).
         const penData = await readOfflinePenData(bleManager);
 
-        // 8. Parse binary stroke data
+        // 12. Parse binary stroke data
         try {
             const { strokes } = parseStrokeFile(penData);
             drawings.push({ timestamp, strokes });
@@ -405,16 +499,18 @@ export async function syncDrawings(bleManager, deviceInfo, opts = {}) {
             console.warn('Failed to parse drawing:', e);
         }
 
-        // 9. Delete file from device
+        // 13. Delete file from device
         if (deleteAfterSync) {
-            await send(bleManager, OPCODE_DELETE_OLDEST, []);
+            const deleteReply = await exchange(bleManager, OPCODE_DELETE_OLDEST, []);
+            checkAckReply(deleteReply, 'delete file');
         }
     }
 
     if (onProgress) onProgress(fileCount, fileCount);
 
-    // 10. Return device to idle
-    await send(bleManager, OPCODE_SET_MODE, [MODE_IDLE]);
+    // 14. Return device to idle
+    const idleReply = await exchange(bleManager, OPCODE_SET_MODE, [MODE_IDLE]);
+    checkAckReply(idleReply, 'idle mode');
 
-    return drawings;
+    return { drawings, dimensions };
 }
