@@ -90,6 +90,11 @@ export class BleManager {
         }
     }
 
+    // True only while the GATT link is actually open (not just "registered").
+    isConnected() {
+        return !!(this._device && this._device.gatt && this._device.gatt.connected);
+    }
+
     // Returns true if the connected device exposes the given GATT service UUID.
     async hasService(serviceUuid) {
         try {

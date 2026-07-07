@@ -202,6 +202,7 @@ export class AppController {
 <div id="auth-toolbar" class="auth-toolbar"></div>
 
 <div class="app-toolbar">
+  <span id="device-conn-dot" class="conn-dot conn-dot-off" title="Not connected"></span>
   <span id="device-label" class="device-label">No device</span>
   <div class="mode-selector">
     <label><input type="radio" name="mode" value="normal" checked> Normal</label>
@@ -381,6 +382,7 @@ export class AppController {
 
     _onDisconnect() {
         this._setStatus('Disconnected — click Connect to reconnect');
+        this._updateConnDot();
         if (this._liveSession) {
             this._liveSession.stop().catch(() => {});
             this._liveSession = null;
@@ -582,5 +584,15 @@ export class AppController {
     _updateDeviceLabel() {
         const el = this._root.querySelector('#device-label');
         if (el) el.textContent = this._deviceInfo?.name ?? 'No device';
+        this._updateConnDot();
+    }
+
+    _updateConnDot() {
+        const dot = this._root.querySelector('#device-conn-dot');
+        if (!dot) return;
+        const connected = this._ble.isConnected();
+        dot.classList.toggle('conn-dot-on', connected);
+        dot.classList.toggle('conn-dot-off', !connected);
+        dot.title = connected ? 'Connected' : 'Not connected';
     }
 }

@@ -7,6 +7,7 @@ Format: `## Unreleased` for pending changes; `## <version> — <date>` for relea
 
 ## Unreleased
 
+- feat: add a live connection-status dot next to the device name in the web app toolbar — previously a registered-but-not-BLE-connected device looked identical to a connected one, since the label was always styled green regardless of actual GATT connection state
 - fix: `app_controller.js` built `_deviceInfo` with a `wacom_uuid` key (matching the Supabase column name) but `sync.js`/`live.js` read `deviceInfo.uuid`, causing `Cannot read properties of undefined (reading 'length')` in `hexBytes()` on every Sync/Live attempt — renamed to `uuid` to match what the BLE modules expect
 - docs: add explicit security-tradeoff callout in README explaining what the publicly-shipped Drive client_secret does and doesn't expose, plus mitigation options
 - fix: Google requires client_secret on the token/refresh exchange for Web application OAuth clients even with PKCE — add `GDRIVE_CLIENT_SECRET` to `storage_oauth.js`'s token and refresh requests, fixing `invalid_request: client_secret is missing` on Drive connect

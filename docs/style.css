@@ -415,9 +415,25 @@ footer .footer-links {
   flex-wrap: wrap;
 }
 
+.conn-dot {
+  display: inline-block;
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.conn-dot-on {
+  background: #1a7f37;
+  box-shadow: 0 0 0 2px rgba(26, 127, 55, 0.2);
+}
+
+.conn-dot-off {
+  background: #999;
+}
+
 .device-label {
   font-weight: 600;
-  color: #1a7f37;
   min-width: 10rem;
 }
 
