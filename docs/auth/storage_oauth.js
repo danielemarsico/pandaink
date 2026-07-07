@@ -1,15 +1,23 @@
-// Google Drive PKCE OAuth flow + token persistence in Supabase.
+// Google Drive OAuth flow (authorization code + PKCE) + token persistence in Supabase.
 //
 // Setup required in Google Cloud Console:
 //   1. Enable the Google Drive API.
-//   2. Create an OAuth 2.0 Web application client (no client_secret needed).
+//   2. Create an OAuth 2.0 Web application client.
 //   3. Add authorized JS origin:  https://danielemarsico.github.io
 //   4. Add authorized redirect URI: https://danielemarsico.github.io/pandaink/app.html
-//   5. Paste the client_id below.
+//   5. Paste the client_id and client_secret below.
+//
+// Note: Google requires client_secret on the token/refresh requests for Web
+// application clients even when PKCE is used — PKCE is an addition here, not
+// a replacement for the secret. This secret ships in the public JS bundle
+// (same tradeoff as the Supabase anon key); PKCE still binds it to a specific
+// consent + single-use code, which is the standard accepted tradeoff for a
+// static site with no backend to hold a true confidential secret.
 
 import { supabase } from './supabase_client.js';
 
-export const GDRIVE_CLIENT_ID = '184540580374-tv7t8s2r6dijvvt52h0oq9nvi9554aqa.apps.googleusercontent.com';
+export const GDRIVE_CLIENT_ID     = '184540580374-tv7t8s2r6dijvvt52h0oq9nvi9554aqa.apps.googleusercontent.com';
+export const GDRIVE_CLIENT_SECRET = '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';
 
 const GDRIVE_SCOPE        = 'https://www.googleapis.com/auth/drive.appdata';
 const TOKEN_ENDPOINT      = 'https://oauth2.googleapis.com/token';
@@ -80,6 +88,7 @@ export async function handleGDriveCallback() {
     // Exchange code for tokens
     const body = new URLSearchParams({
         client_id:     GDRIVE_CLIENT_ID,
+        client_secret: GDRIVE_CLIENT_SECRET,
         redirect_uri:  REDIRECT_URI,
         grant_type:    'authorization_code',
         code,
@@ -151,6 +160,7 @@ export async function getValidAccessToken() {
 
         const body = new URLSearchParams({
             client_id:     GDRIVE_CLIENT_ID,
+            client_secret: GDRIVE_CLIENT_SECRET,
             grant_type:    'refresh_token',
             refresh_token: data.refresh_token,
         });

@@ -7,6 +7,8 @@ Format: `## Unreleased` for pending changes; `## <version> — <date>` for relea
 
 ## Unreleased
 
+- fix: Google requires client_secret on the token/refresh exchange for Web application OAuth clients even with PKCE — add `GDRIVE_CLIENT_SECRET` to `storage_oauth.js`'s token and refresh requests, fixing `invalid_request: client_secret is missing` on Drive connect
+- docs: correct README's claim that the Drive OAuth client needs no secret; document the client_secret + PKCE tradeoff for static sites with no backend
 - fix: README incorrectly told readers to add only the origin (no path) to the Drive client's Authorized redirect URIs, causing `redirect_uri_mismatch` — now specifies the full page URL as required by `REDIRECT_URI` in `storage_oauth.js`
 - docs: document Supabase's default `localhost:3000` OAuth redirect and how to fix it via Site URL / Redirect URLs in README setup steps
 - docs: explain the two separate Google OAuth clients required (Drive access vs Supabase login) in README, with a comparison table and split setup steps (2b/2c) — the two were previously conflated

@@ -79,18 +79,26 @@ used for two unrelated things in this app, and each needs its own client:
 | | Drive access client (2b) | Login client (2c) |
 |---|---|---|
 | What it's for | "Connect Google Drive" in the profile panel — your browser reads/writes the signed-in user's own Drive files. Nothing to do with logging into PandaInk; you're already logged in by the time you click this. | The "Continue with Google" button — just an alternative way to create/enter your PandaInk account. Supabase's servers talk to Google here, not your browser. |
-| Client type | Web application, **no secret** (PKCE — safe to run entirely in the browser) | Web application, **with secret** (the secret is held by Supabase, never shipped to the browser) |
-| Where the credential goes | `docs/auth/storage_oauth.js` (in this repo's code) | Supabase dashboard → Authentication → Providers → Google (not in code at all) |
+| Client type | Web application (PKCE + client_secret — see note below) | Web application, secret held server-side |
+| Where the credential goes | Both Client ID **and** Client Secret pasted into `docs/auth/storage_oauth.js` (this repo's public code) | Client ID + Secret pasted into Supabase dashboard → Authentication → Providers → Google (never shipped to the browser) |
 
-Because one has a secret and the other must not, **you cannot reuse the same client for both** —
-create two.
+**Note on the Drive client's secret:** Google requires `client_secret` on the token/refresh
+requests for *every* "Web application" OAuth client, even when using PKCE — PKCE is an addition
+here, not a replacement for the secret like it is with some other providers. So the Drive
+client's secret ends up shipped in the public JS bundle (`storage_oauth.js`), same tradeoff as the
+Supabase anon key. PKCE still binds it to one specific consent + single-use code, which is the
+accepted tradeoff for a static site with no backend able to hold a true confidential secret.
+
+You still need two separate clients — the credentials go to different places (your code vs.
+Supabase's dashboard) and serve unrelated flows — but don't be surprised that both end up having a
+secret.
 
 #### 2a. Enable the Drive API
 
 1. Go to [console.cloud.google.com](https://console.cloud.google.com) and create a new project (e.g. "PandaInk").
 2. Navigate to **APIs & Services → Library** and enable **Google Drive API**.
 
-#### 2b. OAuth client for Drive access (PKCE — browser-side, no secret)
+#### 2b. OAuth client for Drive access (PKCE + client_secret)
 
 1. Go to **APIs & Services → Credentials → Create Credentials → OAuth client ID**.
 2. Application type: **Web application**. Name it something like "PandaInk Drive access" so it's not confused with 2c.
@@ -102,10 +110,12 @@ create two.
    `REDIRECT_URI`), not just the origin from step 3, or you'll get `Error 400: redirect_uri_mismatch`:
    - `https://danielemarsico.github.io/pandaink/app.html`
    - `http://localhost:8080/app.html` (for local development)
-5. Copy the **Client ID** (ends in `.apps.googleusercontent.com`). There's no secret to copy — this client type doesn't get one.
-6. Paste it into `docs/auth/storage_oauth.js`:
+5. Click **Create** — copy both the **Client ID** (ends in `.apps.googleusercontent.com`) and the
+   **Client Secret** shown in the popup (or find them later under Credentials → this client).
+6. Paste both into `docs/auth/storage_oauth.js`:
    ```js
-   export const GDRIVE_CLIENT_ID = 'YOUR_CLIENT_ID.apps.googleusercontent.com';  // ← line 12
+   export const GDRIVE_CLIENT_ID     = 'YOUR_CLIENT_ID.apps.googleusercontent.com';  // ← line 12
+   export const GDRIVE_CLIENT_SECRET = 'YOUR_CLIENT_SECRET';                          // ← line 13
    ```
 
 #### 2c. OAuth client for "Sign in with Google" login (has a secret)
