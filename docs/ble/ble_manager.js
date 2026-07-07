@@ -39,6 +39,13 @@ export class BleManager {
         };
         this._device.addEventListener('gattserverdisconnected', this._disconnectHandler);
 
+        // Characteristic/notify-handler references are tied to the GATT
+        // session they were retrieved from -- they go stale on reconnect
+        // (even to the same device) and must not be reused, or later calls
+        // fail with "Characteristic ... is no longer valid".
+        this._characteristics.clear();
+        this._notifyHandlers.clear();
+
         this._server = await this._device.gatt.connect();
         this._service = await this._server.getPrimaryService(NORDIC_UART_SERVICE_UUID);
 
