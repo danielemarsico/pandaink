@@ -26,6 +26,7 @@ import {
     REPLY_CRC,
     REPLY_ACK,
     REPLY_CONNECT_OK,
+    REPLY_CONNECT_FAIL,
     MODE_PAPER,
     MODE_IDLE,
     FILE_TRANSFER_ARGS,
@@ -351,10 +352,24 @@ export async function syncDrawings(bleManager, deviceInfo, opts = {}) {
     const uuidBytes = hexBytes(uuid);
 
     // 1. Connect / authenticate
+    // Most devices (Spark/Slate/Folio) reply with the generic ACK opcode
+    // (0xb3), where the payload's first byte is 0x00 on success or a device
+    // error code otherwise -- ports protocol.py's Msg.execute() 0xb3
+    // dispatch. Only Intuos Pro devices reply with raw 0x50/0x51 instead.
     const connectReply = await exchange(bleManager, OPCODE_CONNECT, Array.from(uuidBytes));
-    const connectOk = connectReply.getUint8(0);
-    if (connectOk !== 0x50 /* REPLY_CONNECT_OK */) {
-        throw new Error(`Device rejected connection (opcode 0x${connectOk.toString(16)})`);
+    const connectOpcode = connectReply.getUint8(0);
+    if (connectOpcode === REPLY_ACK) {
+        const status = connectReply.getUint8(2);
+        if (status !== 0x00) {
+            throw new Error(`Device rejected connection (error code 0x${status.toString(16)})`);
+        }
+    } else if (connectOpcode === REPLY_CONNECT_OK) {
+        // success
+    } else if (connectOpcode === REPLY_CONNECT_FAIL) {
+        const reason = connectReply.getUint8(2 + 6); // after the 6-byte echoed uuid
+        throw new Error(`Device rejected connection (reason 0x${reason.toString(16)})`);
+    } else {
+        throw new Error(`Unexpected connect reply (opcode 0x${connectOpcode.toString(16)})`);
     }
 
     // 2. Route offline data to the FFEE0003 GATT characteristic
