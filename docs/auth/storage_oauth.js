@@ -9,7 +9,7 @@
 
 import { supabase } from './supabase_client.js';
 
-export const GDRIVE_CLIENT_ID = 'YOUR_GOOGLE_DRIVE_CLIENT_ID.apps.googleusercontent.com';
+export const GDRIVE_CLIENT_ID = '184540580374-tv7t8s2r6dijvvt52h0oq9nvi9554aqa.apps.googleusercontent.com';
 
 const GDRIVE_SCOPE        = 'https://www.googleapis.com/auth/drive.appdata';
 const TOKEN_ENDPOINT      = 'https://oauth2.googleapis.com/token';
