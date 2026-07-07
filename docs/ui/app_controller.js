@@ -313,6 +313,16 @@ export class AppController {
 
     // ── Connection / registration ────────────────────────────────────────────
 
+    // BLE GATT connections don't survive a page reload — a device loaded from
+    // Supabase looks "registered" but this._ble has no live connection yet.
+    // Sync/Live must reconnect (which reopens the device picker) before using
+    // any GATT characteristic, or they crash deep inside sync.js/live.js.
+    async _ensureBleConnected() {
+        if (this._ble.isConnected()) return;
+        await this._ble.connect();
+        this._updateConnDot();
+    }
+
     async _cmdConnect() {
         this._setStatus('Connecting…');
         try {
@@ -390,6 +400,8 @@ export class AppController {
         btn.disabled = true;
 
         try {
+            await this._ensureBleConnected();
+
             const connected = await isDriveConnected();
             if (!connected) {
                 this._setStatus('Connect Google Drive in Profile → Cloud Storage first.');
@@ -540,6 +552,8 @@ export class AppController {
         btn.disabled = true;
         this._root.querySelector('#live-status').textContent = 'Starting…';
         try {
+            await this._ensureBleConnected();
+
             this._liveCanvas.clear();
             this._liveSession = await startLive(
                 this._ble,
