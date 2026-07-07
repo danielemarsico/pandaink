@@ -9,6 +9,11 @@ Before every `git commit` (and before pushing), update `CHANGELOG.md`:
 ## Autonomous Mode
 - TODO list lives in `TASKS.md`
 
+## Rulebook
+- `RULEBOOK.md` (repo root) is the source of truth for tasks, features, and how
+  they are supposed to work. Consult it before implementing or changing behavior,
+  and keep it updated when features are planned, changed, or completed.
+
 ## Project Layout
 
 ```
