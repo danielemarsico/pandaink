@@ -63,6 +63,13 @@ The live app at `danielemarsico.github.io/pandaink` uses pre-configured Supabase
    ```
 5. (Optional, for testing without email verification) **Authentication → Users → Add user**,
    enter an email/password, and check **Auto Confirm User** to skip the confirmation email.
+6. **Authentication → URL Configuration** — new Supabase projects default to `http://localhost:3000`,
+   which is where OAuth logins (Google/GitHub) will redirect back to instead of your real app if
+   left unchanged:
+   - **Site URL** → `https://danielemarsico.github.io/pandaink/app.html` (or your own domain)
+   - **Redirect URLs** → add the same URL (and e.g. `http://localhost:8080/app.html` if you also
+     test locally). OAuth only redirects to URLs on this allow-list — the `redirectTo` value the
+     code passes (`auth_manager.js`) is ignored if it isn't listed here.
 
 ### 2. Create a Google Cloud project (Google Drive + OAuth)
 
