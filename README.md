@@ -66,36 +66,61 @@ The live app at `danielemarsico.github.io/pandaink` uses pre-configured Supabase
 
 ### 2. Create a Google Cloud project (Google Drive + OAuth)
 
-#### Enable the Drive API
+**You need two separate Google OAuth clients here — they don't share credentials.** Google is
+used for two unrelated things in this app, and each needs its own client:
+
+| | Drive access client (2b) | Login client (2c) |
+|---|---|---|
+| What it's for | "Connect Google Drive" in the profile panel — your browser reads/writes the signed-in user's own Drive files. Nothing to do with logging into PandaInk; you're already logged in by the time you click this. | The "Continue with Google" button — just an alternative way to create/enter your PandaInk account. Supabase's servers talk to Google here, not your browser. |
+| Client type | Web application, **no secret** (PKCE — safe to run entirely in the browser) | Web application, **with secret** (the secret is held by Supabase, never shipped to the browser) |
+| Where the credential goes | `docs/auth/storage_oauth.js` (in this repo's code) | Supabase dashboard → Authentication → Providers → Google (not in code at all) |
+
+Because one has a secret and the other must not, **you cannot reuse the same client for both** —
+create two.
+
+#### 2a. Enable the Drive API
 
 1. Go to [console.cloud.google.com](https://console.cloud.google.com) and create a new project (e.g. "PandaInk").
 2. Navigate to **APIs & Services → Library** and enable **Google Drive API**.
 
-#### Create an OAuth 2.0 client for Drive (PKCE — browser-side)
+#### 2b. OAuth client for Drive access (PKCE — browser-side, no secret)
 
 1. Go to **APIs & Services → Credentials → Create Credentials → OAuth client ID**.
-2. Application type: **Web application**.
+2. Application type: **Web application**. Name it something like "PandaInk Drive access" so it's not confused with 2c.
 3. Add the domain where the app is hosted to **Authorized JavaScript origins**, e.g.:
    - `https://danielemarsico.github.io`
    - `http://localhost:8080` (for local development)
 4. Add the same URL(s) to **Authorized redirect URIs** (the app redirects back to itself after OAuth).
-5. Copy the **Client ID** (ends in `.apps.googleusercontent.com`).
+5. Copy the **Client ID** (ends in `.apps.googleusercontent.com`). There's no secret to copy — this client type doesn't get one.
 6. Paste it into `docs/auth/storage_oauth.js`:
    ```js
    export const GDRIVE_CLIENT_ID = 'YOUR_CLIENT_ID.apps.googleusercontent.com';  // ← line 12
    ```
 
+#### 2c. OAuth client for "Sign in with Google" login (has a secret)
+
+1. Go to **APIs & Services → Credentials → Create Credentials → OAuth client ID**.
+2. Application type: **Web application**. Name it something like "PandaInk Supabase login".
+3. Under **Authorized redirect URIs**, add exactly your Supabase project's callback:
+   ```
+   https://YOUR_PROJECT_ID.supabase.co/auth/v1/callback
+   ```
+4. Click **Create** — a popup shows both a **Client ID** and a **Client Secret** this time. Copy both;
+   you'll paste them into the Supabase dashboard in step 4, not into any file in this repo.
+
 #### Configure the OAuth consent screen
+
+This screen is shared by both clients above.
 
 1. Go to **APIs & Services → OAuth consent screen**.
 2. User type: **External** (or Internal if you have a Google Workspace org).
 3. Fill in App name, support email, developer contact.
 4. Add scope: `https://www.googleapis.com/auth/drive.appdata`
 5. **Add test users** — while the consent screen is in "Testing" mode, only whitelisted Google
-   accounts can complete this OAuth flow: **OAuth consent screen → Test users → + Add users**,
-   enter the real Google account(s) you'll sign into Drive with, save. This is separate from
-   Supabase's own user list (step 1.5 above) — a Supabase login account and a Google Drive test
-   user are two different whitelists, and both need to be set up independently.
+   accounts can complete *either* OAuth flow: **OAuth consent screen → Test users → + Add users**,
+   enter the real Google account(s) you'll test with, save. This is separate from Supabase's own
+   user list (step 1.5 above) — a Supabase login account and a Google test user are two different
+   whitelists, and both need to be set up independently.
 6. Publish the app when ready (moves out of Testing mode so any user can log in — see
    "Submit for Google verification" in the task list).
 
@@ -116,12 +141,9 @@ In your Supabase project, go to **Authentication → Providers**:
 #### Google
 
 1. Enable the **Google** provider.
-2. Paste the **Client ID** and **Client Secret** from the Google Cloud OAuth client you created in step 2.
-   - Note: for the Supabase Google provider you need a **Web application** OAuth client (not the PKCE client used for Drive). You can reuse the same client or create a second one.
-3. Set the callback URL in your Google Cloud OAuth client's **Authorized redirect URIs**:
-   ```
-   https://YOUR_PROJECT_ID.supabase.co/auth/v1/callback
-   ```
+2. Paste the **Client ID** and **Client Secret** from the **login client (step 2c)** — not the
+   Drive access client from 2b, which has no secret to paste here.
+3. Save. No code change or redeploy needed — this lives entirely in the Supabase dashboard.
 
 #### GitHub
 

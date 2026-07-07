@@ -7,6 +7,7 @@ Format: `## Unreleased` for pending changes; `## <version> — <date>` for relea
 
 ## Unreleased
 
+- docs: explain the two separate Google OAuth clients required (Drive access vs Supabase login) in README, with a comparison table and split setup steps (2b/2c) — the two were previously conflated
 - docs: fix stale line-number references in README Web App Setup, add migration 002 to the Supabase setup steps, and clarify that Google Drive test users and Supabase login users are separate whitelists
 - chore: fill in live Google Drive OAuth client ID in `docs/auth/storage_oauth.js`, enabling cloud storage connection on the deployed web app
 - fix: add missing unique constraint on `devices.user_id` (migration 002) — `saveDevice()`'s `upsert(..., { onConflict: 'user_id' })` was failing with a 400 because no such constraint existed
