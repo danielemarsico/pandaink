@@ -7,7 +7,6 @@ import {
 import {
     startGDriveAuth, isDriveConnected, disconnectDrive,
 } from '../auth/storage_oauth.js';
-import { deleteAllDrawings } from '../storage/gdrive_store.js';
 
 export class ProfilePanel {
     constructor(user, onClose, onForgetDevice) {
@@ -211,11 +210,10 @@ export class ProfilePanel {
     }
 
     async _forgetDevice() {
-        if (!confirm('Forget device and delete all cloud drawings? This cannot be undone.')) return;
+        if (!confirm('Forget this device? Your cloud drawings will not be deleted.')) return;
         const row = this._el?.querySelector('#pp-device-row');
-        if (row) row.innerHTML = '<span class="pp-loading">Deleting…</span>';
+        if (row) row.innerHTML = '<span class="pp-loading">Removing…</span>';
         try {
-            await deleteAllDrawings();
             await deleteDevice(this._user.id);
             if (this._onForgetDevice) this._onForgetDevice();
             await this._refreshDevice();

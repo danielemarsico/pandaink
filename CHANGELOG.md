@@ -7,7 +7,7 @@ Format: `## Unreleased` for pending changes; `## <version> — <date>` for relea
 
 ## Unreleased
 
-- fix: "Forget device" (toolbar button) deleted the device row even when `deleteAllDrawings()` failed, silently leaving orphaned drawings in Google Drive with no way to reach them again (their old device id becomes unreachable) — now aborts and surfaces the error instead of unlinking the device; also dropped a dead, redundant `saveDevice()` stub-upsert call that ran immediately before the real row delete
+- fix: "Forget device" (toolbar button and profile panel) no longer deletes cloud drawings — it now only unlinks the device registration; drawings are only ever removed via the explicit per-drawing Delete button. Previously it deleted every cloud drawing outright, and briefly (in an intermediate fix) could still unlink the device even if that deletion failed, orphaning files in Drive under an unreachable device id — this replaces both with "unlink only, never touch Drive"
 - feat: add a live connection-status dot next to the device name in the web app toolbar — previously a registered-but-not-BLE-connected device looked identical to a connected one, since the label was always styled green regardless of actual GATT connection state
 - fix: `app_controller.js` built `_deviceInfo` with a `wacom_uuid` key (matching the Supabase column name) but `sync.js`/`live.js` read `deviceInfo.uuid`, causing `Cannot read properties of undefined (reading 'length')` in `hexBytes()` on every Sync/Live attempt — renamed to `uuid` to match what the BLE modules expect
 - docs: add explicit security-tradeoff callout in README explaining what the publicly-shipped Drive client_secret does and doesn't expose, plus mitigation options

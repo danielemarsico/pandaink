@@ -21,7 +21,7 @@ import {
 } from '../auth/storage_oauth.js';
 
 import {
-    saveDrawing, getDrawingsByDevice, deleteDrawing, deleteAllDrawings,
+    saveDrawing, getDrawingsByDevice, deleteDrawing,
 } from '../storage/gdrive_store.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -358,14 +358,7 @@ export class AppController {
     }
 
     async _cmdForget() {
-        if (!confirm('Forget device and delete all cloud drawings? This cannot be undone.')) return;
-        try {
-            await deleteAllDrawings();
-        } catch (e) {
-            this._setStatus('Failed to delete cloud drawings: ' + e.message);
-            return; // abort — don't unlink the device while its cloud files still exist
-        }
-
+        if (!confirm('Forget this device? Your cloud drawings will not be deleted.')) return;
         await deleteDevice(this._user.id);
 
         this._deviceInfo = null;
