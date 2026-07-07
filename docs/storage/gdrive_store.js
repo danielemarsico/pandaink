@@ -121,11 +121,3 @@ export async function getDrawingsByDevice(deviceId) {
 export async function deleteDrawing(driveFileId) {
     await _deleteFile(driveFileId);
 }
-
-/**
- * Delete ALL drawing files in appDataFolder (used by "Forget device").
- */
-export async function deleteAllDrawings() {
-    const files = await _listFiles('drawing_');
-    await Promise.all(files.map(f => _deleteFile(f.id)));
-}
