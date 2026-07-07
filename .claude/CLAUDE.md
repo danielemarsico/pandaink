@@ -7,7 +7,7 @@ Before every `git commit` (and before pushing), update `CHANGELOG.md`:
 - On a version tag (`v*`), move all `## Unreleased` entries under a new `## <version> — <date>` heading.
 
 ## Autonomous Mode
-- TODO list lives in `.claude/tasks/current.md`
+- TODO list lives in `TASKS.md`
 
 ## Project Layout
 
