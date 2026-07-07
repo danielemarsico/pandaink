@@ -7,6 +7,7 @@ Format: `## Unreleased` for pending changes; `## <version> — <date>` for relea
 
 ## Unreleased
 
+- fix: add missing unique constraint on `devices.user_id` (migration 002) — `saveDevice()`'s `upsert(..., { onConflict: 'user_id' })` was failing with a 400 because no such constraint existed
 - chore: fill in live Supabase project URL and anon key in `docs/auth/supabase_client.js`, enabling auth on the deployed web app
 - docs: document `docs/storage/idb_store.js` as unused/legacy in CLAUDE.md architecture; fix stale `idb_store` reference in a `drawing_canvas.js` comment
 - docs: update README with web app features, auth/cloud architecture, and full external setup instructions (Supabase, Google Cloud, GitHub OAuth)
