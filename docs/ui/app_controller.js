@@ -183,10 +183,10 @@ export class AppController {
         const { data: device } = await loadDevice(this._user.id);
         if (device) {
             this._deviceInfo = {
-                id:         device.id,
-                name:       device.device_name ?? 'Wacom device',
-                wacom_uuid: device.wacom_uuid,
-                protocol:   device.protocol,
+                id:       device.id,
+                name:     device.device_name ?? 'Wacom device',
+                uuid:     device.wacom_uuid,
+                protocol: device.protocol,
             };
             this._updateDeviceLabel();
             this._setStatus('Device loaded — click Connect to reconnect');
@@ -331,10 +331,10 @@ export class AppController {
                 });
                 if (error) throw new Error('Failed to save device: ' + error.message);
                 this._deviceInfo = {
-                    id:         data.id,
-                    name:       data.device_name ?? info.name,
-                    wacom_uuid: data.wacom_uuid,
-                    protocol:   data.protocol,
+                    id:       data.id,
+                    name:     data.device_name ?? info.name,
+                    uuid:     data.wacom_uuid,
+                    protocol: data.protocol,
                 };
                 this._setStatus(`Registered: ${this._deviceInfo.name}`);
                 this._root.querySelector('#btn-forget').style.display = '';
