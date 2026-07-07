@@ -13,7 +13,7 @@ import { ProfilePanel }    from './profile_panel.js';
 import {
     getUser, onAuthStateChange,
     signUpWithEmail, signInWithEmail, signInWithGoogle, signInWithGitHub,
-    signOut, loadDevice, saveDevice,
+    signOut, loadDevice, saveDevice, deleteDevice,
 } from '../auth/auth_manager.js';
 
 import {
@@ -358,17 +358,15 @@ export class AppController {
     }
 
     async _cmdForget() {
-        if (!confirm('Forget device and delete all cloud drawings?')) return;
+        if (!confirm('Forget device and delete all cloud drawings? This cannot be undone.')) return;
         try {
             await deleteAllDrawings();
         } catch (e) {
-            console.warn('deleteAllDrawings failed:', e);
+            this._setStatus('Failed to delete cloud drawings: ' + e.message);
+            return; // abort — don't unlink the device while its cloud files still exist
         }
-        await saveDevice(this._user.id, { wacom_uuid: '', protocol: 0, device_name: '' })
-            .catch(() => {});
-        // Actually delete the row
-        const { supabase } = await import('../auth/supabase_client.js');
-        await supabase.from('devices').delete().eq('user_id', this._user.id);
+
+        await deleteDevice(this._user.id);
 
         this._deviceInfo = null;
         this._drawings   = [];
