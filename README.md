@@ -86,12 +86,32 @@ used for two unrelated things in this app, and each needs its own client:
 requests for *every* "Web application" OAuth client, even when using PKCE — PKCE is an addition
 here, not a replacement for the secret like it is with some other providers. So the Drive
 client's secret ends up shipped in the public JS bundle (`storage_oauth.js`), same tradeoff as the
-Supabase anon key. PKCE still binds it to one specific consent + single-use code, which is the
-accepted tradeoff for a static site with no backend able to hold a true confidential secret.
+Supabase anon key.
 
 You still need two separate clients — the credentials go to different places (your code vs.
 Supabase's dashboard) and serve unrelated flows — but don't be surprised that both end up having a
 secret.
+
+> **⚠ Security tradeoff: the Drive client_secret is public.**
+> Anyone can view-source `storage_oauth.js` and read `GDRIVE_CLIENT_ID` +
+> `GDRIVE_CLIENT_SECRET`. What that does and doesn't allow:
+> - **Not exposed:** any actual Drive data. The secret alone is useless without a valid,
+>   single-use authorization `code` (only produced by a real user completing real consent) and
+>   the matching PKCE `code_verifier` (generated fresh per attempt, never leaves the browser).
+>   The scope is also `drive.appdata` — a hidden per-app folder, not general Drive access.
+> - **What it does allow:** someone could use the leaked ID/secret to stand up a fake login
+>   page impersonating this app's OAuth identity, and if they tricked a victim into approving
+>   it, intercept that victim's authorization code to get a token for *that victim's* Drive.
+>   This is a phishing/impersonation risk, not a direct data-access risk.
+> - **Why it's accepted here:** this is the standard, Google-acknowledged tradeoff for a
+>   browser-only app with no backend server to hold a true confidential secret. Keeping the
+>   OAuth consent screen in "Testing" mode with an explicit test-user allow-list (see the
+>   consent screen steps below) limits who can even reach the flow.
+> - **To eliminate this risk entirely later:** either move the token exchange behind a small
+>   serverless function (e.g. a Supabase Edge Function) so the secret never reaches the
+>   browser, or switch to Google Identity Services' `initTokenClient()` flow, which is
+>   genuinely secretless (tradeoff: no refresh token, access tokens expire in ~1hr and must be
+>   silently reissued instead).
 
 #### 2a. Enable the Drive API
 
