@@ -135,8 +135,17 @@ async function exchange(bleManager, opcode, args = [], timeoutMs = 8000) {
         // before we're listening for it.
         await bleManager.startNotify(NORDIC_UART_CHRC_RX_UUID, (dv) => {
             clearTimeout(timer);
-            bleManager.stopNotify(NORDIC_UART_CHRC_RX_UUID).catch(() => {});
-            resolveReply(dv);
+            // stopNotify() must finish before resolving, or a still-in-flight
+            // cleanup from THIS command can race the next exchange()'s
+            // startNotify() -- ble_manager.js's stopNotify() captures the
+            // handler and un-registers it based on stale state if a new
+            // handler was already installed by then, silently turning
+            // notifications back off right as the next command starts
+            // waiting for its reply (manifests as a mysterious timeout on
+            // the command immediately following a successful one).
+            bleManager.stopNotify(NORDIC_UART_CHRC_RX_UUID)
+                .catch(() => {})
+                .then(() => resolveReply(dv));
         });
         await bleManager.writeCharacteristic(NORDIC_UART_CHRC_TX_UUID, pkt);
     } catch (err) {
@@ -177,13 +186,16 @@ async function readOfflinePenData(bleManager, timeoutMs = 30000) {
     try {
         // The device sends a CRC confirmation on the Nordic UART RX channel after
         // all pen data chunks have been delivered on FFEE0003.
+        // Both stopNotify() calls must finish before resolving -- see the
+        // matching comment in exchange(), above, for why.
         await bleManager.startNotify(NORDIC_UART_CHRC_RX_UUID, (dv) => {
             const opcode = dv.getUint8(0);
             if (opcode === REPLY_CRC) {
                 clearTimeout(timer);
-                bleManager.stopNotify(NORDIC_UART_CHRC_RX_UUID).catch(() => {});
-                bleManager.stopNotify(WACOM_OFFLINE_CHRC_PEN_DATA_UUID).catch(() => {});
-                resolveData(mergeChunks(chunks));
+                Promise.all([
+                    bleManager.stopNotify(NORDIC_UART_CHRC_RX_UUID).catch(() => {}),
+                    bleManager.stopNotify(WACOM_OFFLINE_CHRC_PEN_DATA_UUID).catch(() => {}),
+                ]).then(() => resolveData(mergeChunks(chunks)));
             }
         });
         await bleManager.startNotify(WACOM_OFFLINE_CHRC_PEN_DATA_UUID, (dv) => {
@@ -413,7 +425,13 @@ export async function syncDrawings(bleManager, deviceInfo, opts = {}) {
     const connectOpcode = connectReply.getUint8(0);
     if (connectOpcode === REPLY_ACK) {
         const status = connectReply.getUint8(2);
-        if (status !== 0x00) {
+        if (status === 0x02 /* INVALID_STATE */) {
+            throw new Error(
+                'Device is not ready to connect (invalid state). ' +
+                'Make sure the LED is blue -- press the button on the device to ' +
+                'switch it back from green if needed -- then try again.'
+            );
+        } else if (status !== 0x00) {
             throw new Error(`Device rejected connection (error code 0x${status.toString(16)})`);
         }
     } else if (connectOpcode === REPLY_CONNECT_OK) {
