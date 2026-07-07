@@ -94,10 +94,14 @@ create two.
 
 1. Go to **APIs & Services → Credentials → Create Credentials → OAuth client ID**.
 2. Application type: **Web application**. Name it something like "PandaInk Drive access" so it's not confused with 2c.
-3. Add the domain where the app is hosted to **Authorized JavaScript origins**, e.g.:
+3. Add the domain where the app is hosted to **Authorized JavaScript origins** — **origin only, no path**:
    - `https://danielemarsico.github.io`
    - `http://localhost:8080` (for local development)
-4. Add the same URL(s) to **Authorized redirect URIs** (the app redirects back to itself after OAuth).
+4. Add the **full page URL, including path**, to **Authorized redirect URIs** — this must exactly
+   match `window.location.origin + window.location.pathname` (computed in `storage_oauth.js`'s
+   `REDIRECT_URI`), not just the origin from step 3, or you'll get `Error 400: redirect_uri_mismatch`:
+   - `https://danielemarsico.github.io/pandaink/app.html`
+   - `http://localhost:8080/app.html` (for local development)
 5. Copy the **Client ID** (ends in `.apps.googleusercontent.com`). There's no secret to copy — this client type doesn't get one.
 6. Paste it into `docs/auth/storage_oauth.js`:
    ```js

@@ -7,6 +7,7 @@ Format: `## Unreleased` for pending changes; `## <version> — <date>` for relea
 
 ## Unreleased
 
+- fix: README incorrectly told readers to add only the origin (no path) to the Drive client's Authorized redirect URIs, causing `redirect_uri_mismatch` — now specifies the full page URL as required by `REDIRECT_URI` in `storage_oauth.js`
 - docs: document Supabase's default `localhost:3000` OAuth redirect and how to fix it via Site URL / Redirect URLs in README setup steps
 - docs: explain the two separate Google OAuth clients required (Drive access vs Supabase login) in README, with a comparison table and split setup steps (2b/2c) — the two were previously conflated
 - docs: fix stale line-number references in README Web App Setup, add migration 002 to the Supabase setup steps, and clarify that Google Drive test users and Supabase login users are separate whitelists
