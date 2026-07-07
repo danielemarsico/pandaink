@@ -70,19 +70,32 @@ function u32le(dv, offset) {
 // Send a command and wait for the next notification on RX.
 async function exchange(bleManager, opcode, args = [], timeoutMs = 8000) {
     const pkt = buildPacket(opcode, new Uint8Array(args));
-    const reply = await new Promise((resolve, reject) => {
-        const timer = setTimeout(
-            () => reject(new Error(`Timeout waiting for reply to 0x${opcode.toString(16)}`)),
-            timeoutMs
-        );
-        bleManager.startNotify(NORDIC_UART_CHRC_RX_UUID, (dv) => {
+
+    let resolveReply, rejectReply;
+    const replyPromise = new Promise((resolve, reject) => {
+        resolveReply = resolve;
+        rejectReply  = reject;
+    });
+    const timer = setTimeout(
+        () => rejectReply(new Error(`Timeout waiting for reply to 0x${opcode.toString(16)}`)),
+        timeoutMs
+    );
+
+    try {
+        // Must be subscribed before writing, or the device's reply can arrive
+        // before we're listening for it.
+        await bleManager.startNotify(NORDIC_UART_CHRC_RX_UUID, (dv) => {
             clearTimeout(timer);
             bleManager.stopNotify(NORDIC_UART_CHRC_RX_UUID).catch(() => {});
-            resolve(dv);
+            resolveReply(dv);
         });
-    });
-    await bleManager.writeCharacteristic(NORDIC_UART_CHRC_TX_UUID, pkt);
-    return reply;
+        await bleManager.writeCharacteristic(NORDIC_UART_CHRC_TX_UUID, pkt);
+    } catch (err) {
+        clearTimeout(timer);
+        throw err;
+    }
+
+    return replyPromise;
 }
 
 // Send without waiting for a reply.
@@ -95,35 +108,46 @@ async function send(bleManager, opcode, args = []) {
 // Offline pen data accumulation (FFEE0003 GATT characteristic)
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function readOfflinePenData(bleManager, expectedCrc, timeoutMs = 30000) {
-    return new Promise((resolve, reject) => {
-        const chunks = [];
-        let lastDataTime = Date.now();
+// Subscribes to both notification sources, THEN triggers the download —
+// subscribing after the trigger risks missing data that arrives before we're
+// listening (the same ordering bug as exchange(), above).
+async function readOfflinePenData(bleManager, timeoutMs = 30000) {
+    const chunks = [];
 
-        const timer = setTimeout(() => {
-            bleManager.stopNotify(WACOM_OFFLINE_CHRC_PEN_DATA_UUID).catch(() => {});
-            reject(new Error('Timeout waiting for pen data CRC packet'));
-        }, timeoutMs);
+    let resolveData, rejectData;
+    const dataPromise = new Promise((resolve, reject) => {
+        resolveData = resolve;
+        rejectData  = reject;
+    });
+    const timer = setTimeout(() => {
+        bleManager.stopNotify(WACOM_OFFLINE_CHRC_PEN_DATA_UUID).catch(() => {});
+        bleManager.stopNotify(NORDIC_UART_CHRC_RX_UUID).catch(() => {});
+        rejectData(new Error('Timeout waiting for pen data CRC packet'));
+    }, timeoutMs);
 
+    try {
         // The device sends a CRC confirmation on the Nordic UART RX channel after
         // all pen data chunks have been delivered on FFEE0003.
-        bleManager.startNotify(NORDIC_UART_CHRC_RX_UUID, (dv) => {
+        await bleManager.startNotify(NORDIC_UART_CHRC_RX_UUID, (dv) => {
             const opcode = dv.getUint8(0);
             if (opcode === REPLY_CRC) {
                 clearTimeout(timer);
                 bleManager.stopNotify(NORDIC_UART_CHRC_RX_UUID).catch(() => {});
                 bleManager.stopNotify(WACOM_OFFLINE_CHRC_PEN_DATA_UUID).catch(() => {});
-                const allBytes = mergeChunks(chunks);
-                resolve(allBytes);
+                resolveData(mergeChunks(chunks));
             }
         });
-
-        bleManager.startNotify(WACOM_OFFLINE_CHRC_PEN_DATA_UUID, (dv) => {
-            const bytes = new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength);
-            chunks.push(bytes);
-            lastDataTime = Date.now();
+        await bleManager.startNotify(WACOM_OFFLINE_CHRC_PEN_DATA_UUID, (dv) => {
+            chunks.push(new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength));
         });
-    });
+
+        await send(bleManager, OPCODE_DOWNLOAD_OLDEST, []);
+    } catch (err) {
+        clearTimeout(timer);
+        throw err;
+    }
+
+    return dataPromise;
 }
 
 function mergeChunks(chunks) {
@@ -353,10 +377,9 @@ export async function syncDrawings(bleManager, deviceInfo, opts = {}) {
         const strokeCount = u32le(new DataView(strokesReply.buffer, strokesReply.byteOffset), 2);
         const timestamp   = u32le(new DataView(strokesReply.buffer, strokesReply.byteOffset), 6);
 
-        // 6. Request download of oldest file
-        await send(bleManager, OPCODE_DOWNLOAD_OLDEST, []);
-
-        // 7. Accumulate pen data chunks until CRC packet arrives
+        // 6-7. Subscribe, request download of oldest file, and accumulate pen
+        // data chunks until the CRC packet arrives (readOfflinePenData sends
+        // the trigger itself, after subscribing).
         const penData = await readOfflinePenData(bleManager);
 
         // 8. Parse binary stroke data
