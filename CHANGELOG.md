@@ -7,6 +7,7 @@ Format: `## Unreleased` for pending changes; `## <version> — <date>` for relea
 
 ## Unreleased
 
+- docs: fix stale line-number references in README Web App Setup, add migration 002 to the Supabase setup steps, and clarify that Google Drive test users and Supabase login users are separate whitelists
 - chore: fill in live Google Drive OAuth client ID in `docs/auth/storage_oauth.js`, enabling cloud storage connection on the deployed web app
 - fix: add missing unique constraint on `devices.user_id` (migration 002) — `saveDevice()`'s `upsert(..., { onConflict: 'user_id' })` was failing with a 400 because no such constraint existed
 - chore: fill in live Supabase project URL and anon key in `docs/auth/supabase_client.js`, enabling auth on the deployed web app

@@ -44,19 +44,25 @@ The live app at `danielemarsico.github.io/pandaink` uses pre-configured Supabase
 ### 1. Create a Supabase project
 
 1. Go to [supabase.com](https://supabase.com) and create a free project.
-2. In the SQL editor, run the migration file:
+2. In the SQL editor, run the migration files **in order**:
    ```
    supabase/migrations/001_init.sql
+   supabase/migrations/002_devices_unique_user_id.sql
    ```
-   This creates the `profiles`, `devices`, and `storage_tokens` tables with Row Level Security policies.
+   `001_init.sql` creates the `profiles`, `devices`, and `storage_tokens` tables with Row Level
+   Security policies. `002_devices_unique_user_id.sql` adds a unique constraint on
+   `devices.user_id` — without it, device registration fails with a 400
+   (`saveDevice()` upserts on that column).
 3. Copy your project credentials from **Project Settings → API**:
    - **Project URL** — looks like `https://abcdefgh.supabase.co`
    - **anon / public key** — long JWT string
 4. Paste them into `docs/auth/supabase_client.js`:
    ```js
-   const SUPABASE_URL      = 'https://YOUR_PROJECT_ID.supabase.co';   // ← line 12
-   const SUPABASE_ANON_KEY = 'YOUR_ANON_KEY';                          // ← line 13
+   const SUPABASE_URL      = 'https://YOUR_PROJECT_ID.supabase.co';   // ← line 11
+   const SUPABASE_ANON_KEY = 'YOUR_ANON_KEY';                          // ← line 12
    ```
+5. (Optional, for testing without email verification) **Authentication → Users → Add user**,
+   enter an email/password, and check **Auto Confirm User** to skip the confirmation email.
 
 ### 2. Create a Google Cloud project (Google Drive + OAuth)
 
@@ -76,7 +82,7 @@ The live app at `danielemarsico.github.io/pandaink` uses pre-configured Supabase
 5. Copy the **Client ID** (ends in `.apps.googleusercontent.com`).
 6. Paste it into `docs/auth/storage_oauth.js`:
    ```js
-   export const GDRIVE_CLIENT_ID = 'YOUR_CLIENT_ID.apps.googleusercontent.com';  // ← line 14
+   export const GDRIVE_CLIENT_ID = 'YOUR_CLIENT_ID.apps.googleusercontent.com';  // ← line 12
    ```
 
 #### Configure the OAuth consent screen
@@ -85,8 +91,13 @@ The live app at `danielemarsico.github.io/pandaink` uses pre-configured Supabase
 2. User type: **External** (or Internal if you have a Google Workspace org).
 3. Fill in App name, support email, developer contact.
 4. Add scope: `https://www.googleapis.com/auth/drive.appdata`
-5. Add any test users while the app is in "Testing" mode.
-6. Publish the app when ready (moves out of Testing mode so any user can log in).
+5. **Add test users** — while the consent screen is in "Testing" mode, only whitelisted Google
+   accounts can complete this OAuth flow: **OAuth consent screen → Test users → + Add users**,
+   enter the real Google account(s) you'll sign into Drive with, save. This is separate from
+   Supabase's own user list (step 1.5 above) — a Supabase login account and a Google Drive test
+   user are two different whitelists, and both need to be set up independently.
+6. Publish the app when ready (moves out of Testing mode so any user can log in — see
+   "Submit for Google verification" in the task list).
 
 ### 3. Create a GitHub OAuth App (optional — for "Sign in with GitHub")
 
