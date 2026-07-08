@@ -158,9 +158,14 @@ The device rejects file operations unless this exact handshake runs first
 8. AVAILABLE_FILES → number of stored drawings (may be 0).
 9. Per file, oldest first:
    a. GET_STROKES → stroke count + BCD creation timestamp of the oldest file.
-   b. Subscribe to `ffee0003` *and* RX, then send DOWNLOAD_OLDEST.
-   c. Accumulate binary chunks from `ffee0003` until the CRC packet (`0xc9`)
-      arrives on RX, then concatenate.
+   b. Subscribe to `ffee0003` *and* RX, then send DOWNLOAD_OLDEST. The device
+      first acks it on RX with `0xc8` payload `[0xbe]` ("download starting") —
+      this is NOT the end marker.
+   c. Accumulate binary chunks from `ffee0003` until the end-of-download reply
+      arrives on RX, then concatenate. **Slate/Folio**: `0xc8` with payload
+      `[0xed, <CRC32 little-endian>]`. **Spark/Intuos Pro**: `0xc9` with the
+      CRC32 as payload, big-endian. Either way, verify the CRC against
+      `crc32(concatenated pen data)` and fail the sync on mismatch.
    d. Parse the stroke file (format below).
    e. DELETE_OLDEST (so the next GET_STROKES sees the following file).
 10. SET_MODE idle (`0x02`).
@@ -172,15 +177,28 @@ Concatenated download chunks form one file per drawing:
 - **Header**: 4-byte magic `62 38 62 74` ('b8bt', Spark/Slate — 4-byte header) or
   `67 82 69 65` (Intuos Pro — 16-byte header including a u32 timestamp).
 - **Body**: a stream of variable-length packets, each starting with a 1-byte
-  header whose upper 6 bits are a bitmask of 2-bit fields for the X, Y, and
-  pressure axes: `00` = unchanged, `10` = signed 1-byte delta, `11` = absolute
-  2-byte little-endian value. Packet size = 1 + number of set bits.
-  - `0xfa` — start of a new stroke (2 bytes).
-  - header with low bits `11` and all-`0xff` payload — end of stroke.
-  - `0xff 0xff` prefix — "point" packet (absolute), payload as above.
-  - `0xff 0xff` repeated at top level — end of file.
+  header. Packet size = 1 + popcount(header) (except delta packets, whose size
+  follows from their axis mask). A packet is classified by header **and**
+  payload (payload = the popcount(header) bytes after it), checked in this
+  exact order (ports `StrokeDataType.identify`):
+  1. file magic (`62 38 62 74` / `67 82 69 65`) — file header; mid-stream = desync.
+  2. `0xfc` + 6×`0xff` — end of stroke.
+  3. header `0xff` with all 8 payload bytes `0xff` — end of file. (A full
+     point `[0xff][0xff 0xff][x y p]` is NOT EOF — its coordinate bytes differ.)
+  4. header with low two bits `00` — delta packet: the header's upper 6 bits
+     are 2-bit fields for the X, Y, pressure axes: `00` = unchanged, `10` =
+     signed 1-byte delta, `11` = absolute u16 little-endian.
+  5. payload starting `0xfa` (Intuos Pro; may be followed by a 9-byte pen-ID
+     packet) or `0xff 0xee 0xee` (Slate/Folio) — start of a new stroke; resets
+     the delta accumulators.
+  6. payload starting `0xff 0xff` — "point" packet: a delta packet whose axis
+     mask is the header with the low two bits cleared (headers other than
+     `0xff`, e.g. `0xbf`, occur) and whose payload follows the `0xff 0xff` prefix.
+  7. payload starting `0xdd 0xdd` — lost points marker (skip, emit nothing).
+  8. anything else — unknown; skip 1 + popcount(header) bytes.
 - Coordinates are device units; multiply by point size (10 µm) for physical size.
-  Deltas accumulate on top of the last absolute value per axis.
+  Deltas accumulate cumulatively per axis (P2 = P0 + 2·d1 + d2); an absolute
+  value resets that axis's accumulator.
 
 ### Live mode (real-time streaming)
 
