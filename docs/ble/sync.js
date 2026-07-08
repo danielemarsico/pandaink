@@ -30,6 +30,7 @@ import {
     REPLY_GET_FIRMWARE,
     REPLY_GET_DIMENSIONS,
     REPLY_CRC,
+    REPLY_DOWNLOAD_OLDEST,
     REPLY_ACK,
     REPLY_CONNECT_OK,
     REPLY_CONNECT_FAIL,
@@ -166,37 +167,118 @@ async function send(bleManager, opcode, args = []) {
 // Offline pen data accumulation (FFEE0003 GATT characteristic)
 // ─────────────────────────────────────────────────────────────────────────────
 
+// CRC-32 (IEEE 802.3, reflected, same polynomial/parameters as Python's
+// binascii.crc32) -- used to verify the downloaded pen data against the
+// checksum the device sends in its end-of-download reply.
+const CRC32_TABLE = (() => {
+    const table = new Uint32Array(256);
+    for (let n = 0; n < 256; n++) {
+        let c = n;
+        for (let k = 0; k < 8; k++) {
+            c = (c & 1) ? ((0xedb88320 ^ (c >>> 1)) >>> 0) : (c >>> 1);
+        }
+        table[n] = c >>> 0;
+    }
+    return table;
+})();
+
+export function crc32(bytes) {
+    let c = 0xffffffff;
+    for (let i = 0; i < bytes.length; i++) {
+        c = (CRC32_TABLE[(c ^ bytes[i]) & 0xff] ^ (c >>> 8)) >>> 0;
+    }
+    return (c ^ 0xffffffff) >>> 0;
+}
+
 // Subscribes to both notification sources, THEN triggers the download —
 // subscribing after the trigger risks missing data that arrives before we're
 // listening (the same ordering bug as exchange(), above).
-async function readOfflinePenData(bleManager, timeoutMs = 30000) {
+//
+// End-of-download signalling differs by protocol generation (ports
+// MsgWaitForEndRead / MsgWaitForEndReadSlate from protocol.py):
+//   - Spark / Intuos Pro: a 0xc9 reply whose payload is the CRC, big-endian.
+//   - Slate / Folio: a 0xc8 reply with payload [0xed, <CRC little-endian>].
+// In addition, the device acks the DOWNLOAD_OLDEST command itself with an
+// initial 0xc8 [0xbe] "download starting" reply (MsgDownloadOldestFile,
+// protocol.py) which must NOT be mistaken for the end marker.
+export async function readOfflinePenData(bleManager, timeoutMs = 30000) {
     const chunks = [];
+    let sawStartAck = false;
 
     let resolveData, rejectData;
     const dataPromise = new Promise((resolve, reject) => {
         resolveData = resolve;
         rejectData  = reject;
     });
-    const timer = setTimeout(() => {
-        bleManager.stopNotify(WACOM_OFFLINE_CHRC_PEN_DATA_UUID).catch(() => {});
-        bleManager.stopNotify(NORDIC_UART_CHRC_RX_UUID).catch(() => {});
-        rejectData(new Error('Timeout waiting for pen data CRC packet'));
-    }, timeoutMs);
+    // Both stopNotify() calls must finish before settling -- see the matching
+    // comment in exchange(), above, for why.
+    const finish = (settle, value) => {
+        clearTimeout(timer);
+        Promise.all([
+            bleManager.stopNotify(NORDIC_UART_CHRC_RX_UUID).catch(() => {}),
+            bleManager.stopNotify(WACOM_OFFLINE_CHRC_PEN_DATA_UUID).catch(() => {}),
+        ]).then(() => settle(value));
+    };
+    const timer = setTimeout(
+        () => finish(rejectData, new Error('Timeout waiting for end-of-download reply')),
+        timeoutMs
+    );
 
     try {
-        // The device sends a CRC confirmation on the Nordic UART RX channel after
-        // all pen data chunks have been delivered on FFEE0003.
-        // Both stopNotify() calls must finish before resolving -- see the
-        // matching comment in exchange(), above, for why.
+        // The device sends the end-of-download confirmation on the Nordic UART
+        // RX channel after all pen data chunks have been delivered on FFEE0003.
         await bleManager.startNotify(NORDIC_UART_CHRC_RX_UUID, (dv) => {
             const opcode = dv.getUint8(0);
-            if (opcode === REPLY_CRC) {
-                clearTimeout(timer);
-                Promise.all([
-                    bleManager.stopNotify(NORDIC_UART_CHRC_RX_UUID).catch(() => {}),
-                    bleManager.stopNotify(WACOM_OFFLINE_CHRC_PEN_DATA_UUID).catch(() => {}),
-                ]).then(() => resolveData(mergeChunks(chunks)));
+            const length = dv.getUint8(1);
+            const payload = new Uint8Array(
+                dv.buffer, dv.byteOffset + 2, Math.min(length, dv.byteLength - 2)
+            );
+
+            let expectedCrc;
+            if (opcode === REPLY_DOWNLOAD_OLDEST) {
+                if (payload[0] === 0xbe) {
+                    // Ack for the DOWNLOAD_OLDEST command: download starting.
+                    if (!sawStartAck) {
+                        sawStartAck = true;
+                        return;
+                    }
+                    finish(rejectData, new Error('Unexpected repeated download-start ack (0xc8 be)'));
+                    return;
+                }
+                if (payload[0] !== 0xed) {
+                    finish(rejectData, new Error(
+                        `Unexpected 0xc8 payload while downloading pen data (0x${(payload[0] ?? 0).toString(16)}, expected 0xed)`
+                    ));
+                    return;
+                }
+                // Slate/Folio end marker: CRC bytes follow 0xed in reverse
+                // (little-endian) byte order.
+                expectedCrc = 0;
+                for (let k = payload.length - 1; k >= 1; k--) {
+                    expectedCrc = expectedCrc * 256 + payload[k];
+                }
+            } else if (opcode === REPLY_CRC) {
+                // Spark/Intuos Pro end marker: payload is the CRC, big-endian.
+                expectedCrc = 0;
+                for (let k = 0; k < payload.length; k++) {
+                    expectedCrc = expectedCrc * 256 + payload[k];
+                }
+            } else {
+                finish(rejectData, new Error(
+                    `Unexpected reply while downloading pen data (opcode 0x${opcode.toString(16)})`
+                ));
+                return;
             }
+
+            const penData = mergeChunks(chunks);
+            const actualCrc = crc32(penData);
+            if (actualCrc !== expectedCrc) {
+                finish(rejectData, new Error(
+                    `Pen data CRC mismatch (device 0x${expectedCrc.toString(16)}, computed 0x${actualCrc.toString(16)})`
+                ));
+                return;
+            }
+            finish(resolveData, penData);
         });
         await bleManager.startNotify(WACOM_OFFLINE_CHRC_PEN_DATA_UUID, (dv) => {
             chunks.push(new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength));
@@ -229,7 +311,7 @@ function mergeChunks(chunks) {
 const FILE_MAGIC_SPARK = 0x74623862;     // 'b8bt' little-endian
 const FILE_MAGIC_INTUOS = 0x65698267;    // 'g8ie' little-endian
 
-function parseStrokeFile(data) {
+export function parseStrokeFile(data) {
     const dv = new DataView(data.buffer, data.byteOffset);
     const magic = u32le(dv, 0);
 
@@ -252,77 +334,164 @@ function signedByte(v) {
     return v >= 128 ? v - 256 : v;
 }
 
-function parseStrokeData(data) {
+// Packet types, ports StrokeDataType from protocol.py. A packet is
+// classified by its header byte AND its payload (payload length =
+// popcount(header)); the check order matters and mirrors
+// StrokeDataType.identify exactly.
+const PKT_UNKNOWN       = 0;
+const PKT_FILE_HEADER   = 1;
+const PKT_STROKE_HEADER = 2;
+const PKT_STROKE_END    = 3;
+const PKT_POINT         = 4;
+const PKT_DELTA         = 5;
+const PKT_EOF           = 6;
+const PKT_LOST_POINT    = 7;
+
+function identifyPacket(data, i) {
+    const header = data[i];
+    const nbytes = popcount(header);
+
+    // Known file format headers
+    if (i + 4 <= data.length) {
+        const magic = (data[i] | (data[i + 1] << 8) | (data[i + 2] << 16)
+            | (data[i + 3] << 24)) >>> 0;
+        if (magic === FILE_MAGIC_SPARK || magic === FILE_MAGIC_INTUOS) {
+            return PKT_FILE_HEADER;
+        }
+    }
+
+    // End of stroke: exactly [0xfc, ff ff ff ff ff ff]
+    if (header === 0xfc && i + 7 <= data.length) {
+        let allFF = true;
+        for (let j = 1; j <= 6; j++) {
+            if (data[i + j] !== 0xff) { allFF = false; break; }
+        }
+        if (allFF) return PKT_STROKE_END;
+    }
+
+    // EOF: all 8 payload bytes are 0xff (only header 0xff has an
+    // 8-byte payload)
+    if (nbytes === 8 && i + 9 <= data.length) {
+        let allFF = true;
+        for (let j = 1; j <= 8; j++) {
+            if (data[i + j] !== 0xff) { allFF = false; break; }
+        }
+        if (allFF) return PKT_EOF;
+    }
+
+    // All special headers have the lowest two bits set
+    if ((header & 0x3) === 0) return PKT_DELTA;
+
+    if (nbytes === 0 || i + 1 >= data.length) return PKT_UNKNOWN;
+
+    const p0 = data[i + 1];
+    // Stroke header: Intuos-Pro-style [0xfa …] payload or Slate-style
+    // [0xff 0xee 0xee …] payload
+    if (p0 === 0xfa) return PKT_STROKE_HEADER;
+    if (nbytes >= 3 && i + 3 < data.length
+        && p0 === 0xff && data[i + 2] === 0xee && data[i + 3] === 0xee) {
+        return PKT_STROKE_HEADER;
+    }
+    if (nbytes >= 2 && i + 2 < data.length && p0 === 0xff && data[i + 2] === 0xff) {
+        return PKT_POINT;
+    }
+    if (nbytes >= 2 && i + 2 < data.length && p0 === 0xdd && data[i + 2] === 0xdd) {
+        return PKT_LOST_POINT;
+    }
+
+    return PKT_UNKNOWN;
+}
+
+// Byte size of a stroke-header packet, including the optional pen-ID
+// extension packet used by Intuos-Pro-style headers (ports StrokeHeader
+// from protocol.py; Slate headers are always just 1 + popcount(header)).
+function strokeHeaderSize(data, i) {
+    const header = data[i];
+    let size = 1 + popcount(header);
+    if (data[i + 1] === 0xfa && (data[i + 2] & 0x80)) {
+        // Pen ID follows in an extra packet: 0xff header + 8 payload bytes
+        const penHeader = data[i + size];
+        if (penHeader !== 0xff) {
+            throw new Error(`Unexpected pen id packet header 0x${(penHeader ?? 0).toString(16)}`);
+        }
+        size += 1 + popcount(penHeader);
+    }
+    return size;
+}
+
+export function parseStrokeData(data) {
     const strokes = [];
     let points = [];
 
-    let lastX = 0, lastY = 0, lastP = 0;
-    let dx = 0, dy = 0, dp = 0;
+    // Cumulative-delta decompression state -- the device keeps a running
+    // per-axis delta so that P2 = P0 + 2*d1 + d2 etc.; an absolute
+    // coordinate resets that axis's delta. See the long comment in
+    // protocol.py's StrokeFile._parse_data.
+    let lastX = 0, lastY = 0, lastP = 0;    // abs coords of most recent point
+    let dx = 0, dy = 0, dp = 0;             // accumulated per-axis deltas
 
     let i = 0;
     while (i < data.length) {
-        const hdr = data[i];
+        const header = data[i];
+        const type = identifyPacket(data, i);
 
-        // EOF packet: 0xff repeated
-        if (hdr === 0xff && i + 1 < data.length && data[i + 1] === 0xff) {
+        if (type === PKT_FILE_HEADER) {
+            // File headers are handled outside this function; hitting one
+            // mid-stream means the parser lost sync.
+            console.error(`Unexpected file header at byte ${i}`);
+            break;
+        }
+
+        if (type === PKT_EOF) {
             if (points.length) { strokes.push(points); points = []; }
             break;
         }
 
-        // End-of-stroke: header 0xfc or 0xff with payload all 0xff
-        if ((hdr & 0x3) === 0x3 && _isEndOfStroke(data, i)) {
+        if (type === PKT_STROKE_END) {
             if (points.length) { strokes.push(points); points = []; }
-            i += _packetSize(hdr);
-            dx = 0; dy = 0; dp = 0;
+            i += 1 + popcount(header);
             continue;
         }
 
-        // StrokeHeader 0xfa: new stroke start
-        if (hdr === 0xfa) {
+        if (type === PKT_STROKE_HEADER) {
+            // New stroke: store the finished stroke, reset the delta
+            // accumulator (but keep the last absolute position as baseline)
             if (points.length) { strokes.push(points); points = []; }
             dx = 0; dy = 0; dp = 0;
-            i += 2;
+            i += strokeHeaderSize(data, i);
             continue;
         }
 
-        // Delta / Point packet
-        if ((hdr & 0x3) === 0) {
-            // StrokeDelta
-            const result = parseDelta(data, i, lastX, lastY, lastP, dx, dy, dp);
-            lastX = result.x; lastY = result.y; lastP = result.p;
-            dx = result.dx; dy = result.dy; dp = result.dp;
-            points.push({ x: lastX, y: lastY, p: lastP });
-            i += result.size;
-        } else if ((hdr & 0x3) === 0x3) {
-            // StrokePoint (0xff 0xff prefix + delta payload)
-            i += 2; // skip 0xff 0xff
-            const result = parseDelta(data, i, lastX, lastY, lastP, dx, dy, dp);
-            lastX = result.x; lastY = result.y; lastP = result.p;
-            dx = result.dx; dy = result.dy; dp = result.dp;
-            points.push({ x: lastX, y: lastY, p: lastP });
-            i += result.size;
+        if (type === PKT_LOST_POINT) {
+            // Firmware couldn't record some points; nothing to emit
+            i += 1 + popcount(header);
+            continue;
+        }
+
+        if (type === PKT_UNKNOWN) {
+            i += 1 + popcount(header);
+            continue;
+        }
+
+        // POINT or DELTA. A POINT is just a delta whose payload is prefixed
+        // with [0xff 0xff] and whose axis mask is the header byte with the
+        // low two bits cleared -- headers other than 0xff (e.g. 0xbf) do
+        // occur (ports StrokePoint from protocol.py).
+        let result;
+        if (type === PKT_POINT) {
+            result = parseDelta(data, i + 3, header & ~0x3, lastX, lastY, lastP, dx, dy, dp);
+            i += 3 + result.consumed;
         } else {
-            // Unknown — skip 1 + popcount(hdr) bytes
-            const skip = 1 + popcount(hdr);
-            i += skip;
+            result = parseDelta(data, i + 1, header, lastX, lastY, lastP, dx, dy, dp);
+            i += 1 + result.consumed;
         }
+        lastX = result.x; lastY = result.y; lastP = result.p;
+        dx = result.dx; dy = result.dy; dp = result.dp;
+        points.push({ x: lastX, y: lastY, p: lastP });
     }
 
     if (points.length) strokes.push(points);
     return strokes;
-}
-
-function _isEndOfStroke(data, i) {
-    const hdr = data[i];
-    const size = _packetSize(hdr);
-    for (let j = i + 1; j < i + size && j < data.length; j++) {
-        if (data[j] !== 0xff) return false;
-    }
-    return true;
-}
-
-function _packetSize(hdr) {
-    return 1 + popcount(hdr);
 }
 
 function popcount(v) {
@@ -331,64 +500,48 @@ function popcount(v) {
     return c;
 }
 
-// Parse a StrokeDelta from data[i..]. Returns updated coordinates and packet size.
-function parseDelta(data, i, x, y, p, dx, dy, dp) {
-    const hdr = data[i];
-    const bitmask = hdr >> 2;
-    let pos = i + 1;
-    let size = 1;
+// Parse the per-axis payload at data[pos..] described by maskByte (a header
+// byte whose low two bits are clear). Each 2-bit field describes one axis:
+// 00 = unchanged, 10 = signed 1-byte delta, 11 = absolute u16 little-endian.
+// Returns the new coordinates, the new delta accumulators, and the number of
+// payload bytes consumed.
+function parseDelta(data, pos, maskByte, x, y, p, dx, dy, dp) {
+    const bitsX = (maskByte >> 2) & 0x3;
+    const bitsY = (maskByte >> 4) & 0x3;
+    const bitsP = (maskByte >> 6) & 0x3;
 
-    // Each pair of bits in bitmask describes one axis: 00=unchanged, 01=abs, 10=delta
-    function readAxis(curAbs, curDelta) {
-        const bits = bitmask & 0x3;
-        bitmask >>= 2; // conceptually — JS doesn't mutate vars, so we inline below
+    let consumed = 0;
+
+    function readAxis(bits, abs, delta) {
         if (bits === 0x3) {
-            // absolute 2-byte little-endian
-            const v = data[pos] | (data[pos + 1] << 8);
-            pos += 2; size += 2;
-            return { abs: v, delta: 0 };
-        } else if (bits === 0x2) {
-            // signed 1-byte delta
-            const v = signedByte(data[pos]);
-            pos += 1; size += 1;
-            curDelta += v;
-            return { abs: curAbs, delta: curDelta };
+            // absolute 2-byte little-endian; resets this axis's delta
+            const v = data[pos + consumed] | (data[pos + consumed + 1] << 8);
+            consumed += 2;
+            return [v, 0];
         }
-        return { abs: curAbs, delta: curDelta };
+        if (bits === 0x2) {
+            // signed 1-byte delta, accumulates
+            const v = signedByte(data[pos + consumed]);
+            consumed += 1;
+            return [abs, delta + v];
+        }
+        if (bits === 0x1) {
+            // Not implemented by any device; the payload size would be
+            // ambiguous, so fail loudly instead of desyncing.
+            throw new Error('Invalid axis mask 0x1 in stroke delta');
+        }
+        return [abs, delta];
     }
 
-    // Re-implement with explicit bit extraction since JS closures don't share mutation
-    let b = hdr >> 2;
-
-    const bitsX = b & 0x3; b >>= 2;
-    const bitsY = b & 0x3; b >>= 2;
-    const bitsP = b & 0x3;
-
-    let newX = x, newY = y, newP = p;
-    let newDx = dx, newDy = dy, newDp = dp;
-
-    if (bitsX === 0x3) {
-        newX = data[pos] | (data[pos + 1] << 8); newDx = 0; pos += 2; size += 2;
-    } else if (bitsX === 0x2) {
-        newDx += signedByte(data[pos]); pos += 1; size += 1;
-    }
-
-    if (bitsY === 0x3) {
-        newY = data[pos] | (data[pos + 1] << 8); newDy = 0; pos += 2; size += 2;
-    } else if (bitsY === 0x2) {
-        newDy += signedByte(data[pos]); pos += 1; size += 1;
-    }
-
-    if (bitsP === 0x3) {
-        newP = data[pos] | (data[pos + 1] << 8); newDp = 0; pos += 2; size += 2;
-    } else if (bitsP === 0x2) {
-        newDp += signedByte(data[pos]); pos += 1; size += 1;
-    }
+    let newX, newY, newP, newDx, newDy, newDp;
+    [newX, newDx] = readAxis(bitsX, x, dx);
+    [newY, newDy] = readAxis(bitsY, y, dy);
+    [newP, newDp] = readAxis(bitsP, p, dp);
 
     return {
         x: newX + newDx, y: newY + newDy, p: newP + newDp,
         dx: newDx, dy: newDy, dp: newDp,
-        size,
+        consumed,
     };
 }
 
@@ -505,7 +658,9 @@ export async function syncDrawings(bleManager, deviceInfo, opts = {}) {
         );
 
         // 10-11. Subscribe, request download of oldest file, and accumulate
-        // pen data chunks until the CRC packet arrives (readOfflinePenData
+        // pen data chunks until the CRC-carrying end-of-download reply
+        // arrives -- 0xc8 [0xed …] on Slate/Folio, 0xc9 on Spark
+        // (readOfflinePenData
         // sends the trigger itself, after subscribing).
         const penData = await readOfflinePenData(bleManager);
 
