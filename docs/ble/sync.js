@@ -71,6 +71,65 @@ function deviceNotReadyError() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Verbose protocol trace (off by default)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Turn on from the browser console to log every command and raw reply through
+// the whole handshake, so one sync attempt captures the full exchange:
+//
+//     localStorage.setItem('pandaink_sync_trace', '1');   // persists; then Sync
+//     // or, for this page only:  window.PANDAINK_SYNC_TRACE = true;
+//
+// Turn off:  localStorage.removeItem('pandaink_sync_trace')
+//
+// No reload needed -- the flag is read at each call.
+function traceEnabled() {
+    try {
+        if (typeof window !== 'undefined' && window.PANDAINK_SYNC_TRACE) return true;
+        return typeof localStorage !== 'undefined'
+            && localStorage.getItem('pandaink_sync_trace') === '1';
+    } catch {
+        return false;
+    }
+}
+
+function trace(...args) {
+    if (traceEnabled()) console.log('[sync]', ...args);
+}
+
+// Format a Uint8Array / DataView / array as space-separated hex bytes.
+function hex(bytes) {
+    let arr;
+    if (bytes instanceof DataView) {
+        arr = new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    } else if (bytes instanceof Uint8Array) {
+        arr = bytes;
+    } else {
+        arr = new Uint8Array(bytes);
+    }
+    return Array.from(arr, (b) => b.toString(16).padStart(2, '0')).join(' ');
+}
+
+// Human-readable name for a command opcode, for the trace output.
+const OPCODE_NAMES = {
+    [OPCODE_CONNECT]:           'CONNECT',
+    [OPCODE_SET_TIME]:          'SET_TIME',
+    [OPCODE_GET_BATTERY]:       'GET_BATTERY',
+    [OPCODE_GET_DIMENSIONS]:    'GET_DIMENSIONS',
+    [OPCODE_GET_FIRMWARE]:      'GET_FIRMWARE',
+    [OPCODE_SET_FILE_TRANSFER]: 'SET_FILE_TRANSFER',
+    [OPCODE_SET_MODE]:          'SET_MODE',
+    [OPCODE_AVAILABLE_FILES]:   'AVAILABLE_FILES',
+    [OPCODE_GET_STROKES]:       'GET_STROKES',
+    [OPCODE_DOWNLOAD_OLDEST]:   'DOWNLOAD_OLDEST',
+    [OPCODE_DELETE_OLDEST]:     'DELETE_OLDEST',
+};
+
+function opcodeName(opcode) {
+    return OPCODE_NAMES[opcode] || `0x${opcode.toString(16)}`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Nordic UART packet helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -238,6 +297,7 @@ function parseGetStrokesReply(reply) {
 // Send a command and wait for the next notification on RX.
 async function exchange(bleManager, opcode, args = [], timeoutMs = 8000) {
     const pkt = buildPacket(opcode, new Uint8Array(args));
+    trace(`→ ${opcodeName(opcode)} [${hex(pkt)}]`);
 
     let resolveReply, rejectReply;
     const replyPromise = new Promise((resolve, reject) => {
@@ -262,6 +322,7 @@ async function exchange(bleManager, opcode, args = [], timeoutMs = 8000) {
             // notifications back off right as the next command starts
             // waiting for its reply (manifests as a mysterious timeout on
             // the command immediately following a successful one).
+            trace(`← ${opcodeName(opcode)} reply [${hex(dv)}]`);
             bleManager.stopNotify(NORDIC_UART_CHRC_RX_UUID)
                 .catch(() => {})
                 .then(() => resolveReply(dv));
@@ -278,6 +339,7 @@ async function exchange(bleManager, opcode, args = [], timeoutMs = 8000) {
 // Send without waiting for a reply.
 async function send(bleManager, opcode, args = []) {
     const pkt = buildPacket(opcode, new Uint8Array(args));
+    trace(`→ ${opcodeName(opcode)} (no reply) [${hex(pkt)}]`);
     await bleManager.writeCharacteristic(NORDIC_UART_CHRC_TX_UUID, pkt);
 }
 
@@ -351,6 +413,7 @@ export async function readOfflinePenData(bleManager, timeoutMs = 30000) {
             const payload = new Uint8Array(
                 dv.buffer, dv.byteOffset + 2, Math.min(length, dv.byteLength - 2)
             );
+            trace(`← download RX [${hex(dv)}]`);
 
             let expectedCrc;
             if (opcode === REPLY_DOWNLOAD_OLDEST) {
@@ -390,6 +453,8 @@ export async function readOfflinePenData(bleManager, timeoutMs = 30000) {
 
             const penData = mergeChunks(chunks);
             const actualCrc = crc32(penData);
+            trace(`end-of-download: ${chunks.length} chunk(s), ${penData.length} bytes, `
+                + `CRC device 0x${expectedCrc.toString(16)} / computed 0x${actualCrc.toString(16)}`);
             if (actualCrc !== expectedCrc) {
                 finish(rejectData, new Error(
                     `Pen data CRC mismatch (device 0x${expectedCrc.toString(16)}, computed 0x${actualCrc.toString(16)})`
@@ -400,6 +465,7 @@ export async function readOfflinePenData(bleManager, timeoutMs = 30000) {
         });
         await bleManager.startNotify(WACOM_OFFLINE_CHRC_PEN_DATA_UUID, (dv) => {
             chunks.push(new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength));
+            trace(`  pen-data chunk #${chunks.length}: ${dv.byteLength} bytes`);
         });
 
         await send(bleManager, OPCODE_DOWNLOAD_OLDEST, []);
@@ -683,6 +749,8 @@ export async function syncDrawings(bleManager, deviceInfo, opts = {}) {
     const { uuid } = deviceInfo;
     const uuidBytes = hexBytes(uuid);
 
+    trace(`sync start — device "${deviceInfo.name ?? '?'}" uuid ${uuid} protocol ${deviceInfo.protocol ?? '?'}`);
+
     // The device rejects the file-count query below (and everything after)
     // with a generic ACK error unless this whole handshake runs first, in
     // this order -- ports WacomDeviceSlate.retrieve_data() from wacom_win.py.
@@ -746,6 +814,7 @@ export async function syncDrawings(bleManager, deviceInfo, opts = {}) {
         console.warn('Device did not report dimensions; using Slate defaults');
         dimensions = [SLATE_DEFAULT_WIDTH_PTS * POINT_SIZE_UM, SLATE_DEFAULT_HEIGHT_PTS * POINT_SIZE_UM];
     }
+    trace(`dimensions = [${dimensions.join(', ')}] µm`);
 
     // 5. Query firmware version (two requests with different selectors;
     // result currently unused, same handshake-order requirement as above, and
@@ -767,6 +836,7 @@ export async function syncDrawings(bleManager, deviceInfo, opts = {}) {
     // reply so "no drawings" can't crash with a DataView bounds error).
     const countReply = await exchange(bleManager, OPCODE_AVAILABLE_FILES, []);
     const fileCount = parseFileCount(countReply);
+    trace(`available files = ${fileCount}`);
 
     const drawings = [];
 
@@ -777,7 +847,8 @@ export async function syncDrawings(bleManager, deviceInfo, opts = {}) {
         // BCD-encoded (not a raw little-endian integer) -- ports protocol.py's
         // MsgGetStrokesSlate._handle_reply.
         const strokesReply = await exchange(bleManager, OPCODE_GET_STROKES, []);
-        const { timestamp } = parseGetStrokesReply(strokesReply);
+        const { count, timestamp } = parseGetStrokesReply(strokesReply);
+        trace(`file ${n + 1}/${fileCount}: ${count} stroke-bytes, timestamp ${timestamp} (${new Date(timestamp * 1000).toISOString()})`);
 
         // 10-11. Subscribe, request download of oldest file, and accumulate
         // pen data chunks until the CRC-carrying end-of-download reply
@@ -789,9 +860,12 @@ export async function syncDrawings(bleManager, deviceInfo, opts = {}) {
         // 12. Parse binary stroke data
         try {
             const { strokes } = parseStrokeFile(penData);
+            const pts = strokes.reduce((n, s) => n + s.length, 0);
+            trace(`  parsed ${strokes.length} stroke(s), ${pts} point(s)`);
             drawings.push({ timestamp, strokes });
         } catch (e) {
             console.warn('Failed to parse drawing:', e);
+            trace(`  parse FAILED: ${e.message}; raw pen data [${hex(penData)}]`);
         }
 
         // 13. Delete file from device
