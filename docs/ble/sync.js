@@ -166,6 +166,61 @@ function checkDataOrAckReply(reply, dataOpcode, label, optional = false) {
     throw new Error(`Unexpected reply to ${label} (opcode 0x${opcode.toString(16)})`);
 }
 
+// Payload byte at index `p` (0-based), i.e. skipping the [opcode, length]
+// header, or `dflt` if the packet is too short. Guards every field read so a
+// truncated or unexpected reply can never throw "Offset is outside the bounds
+// of the DataView" -- it produces a clear, actionable error instead.
+function payloadByte(reply, p, dflt = 0) {
+    const off = 2 + p;
+    return off < reply.byteLength ? reply.getUint8(off) : dflt;
+}
+
+// Parse the AVAILABLE_FILES count reply. The reference (protocol.py
+// MsgAvailableFilesCountSlate) requires opcode 0xc2 and reads the count as a
+// little-endian u16 from the payload. A device with no drawings may instead
+// answer with a bare 0xb3 ACK -- treat a success ACK as "0 files" rather than
+// crashing on the short packet.
+function parseFileCount(reply) {
+    const opcode = reply.getUint8(0);
+    if (opcode === REPLY_AVAILABLE_FILES) {
+        return payloadByte(reply, 0) | (payloadByte(reply, 1) << 8);
+    }
+    if (opcode === REPLY_ACK) {
+        const status = payloadByte(reply, 0);
+        if (status === ERR_INVALID_STATE) throw new Error(DEVICE_NOT_READY_MSG);
+        if (status !== 0x00) {
+            throw new Error(`Device rejected file-count query (error code 0x${status.toString(16)})`);
+        }
+        console.warn('AVAILABLE_FILES answered with a bare ACK; treating as 0 drawings');
+        return 0;
+    }
+    throw new Error(`Unexpected file-count reply (opcode 0x${opcode.toString(16)})`);
+}
+
+// Parse a GET_STROKES reply: opcode 0xcf, payload [count u32 LE][6-byte BCD
+// timestamp] (protocol.py MsgGetStrokesSlate). Validates the opcode and length
+// before reading so a short/ACK reply yields a clear error, not a DataView
+// bounds crash.
+function parseGetStrokesReply(reply) {
+    const opcode = reply.getUint8(0);
+    if (opcode !== REPLY_GET_STROKES) {
+        if (opcode === REPLY_ACK) {
+            const status = payloadByte(reply, 0);
+            if (status === ERR_INVALID_STATE) throw new Error(DEVICE_NOT_READY_MSG);
+            throw new Error(`Device rejected stroke query (error code 0x${status.toString(16)})`);
+        }
+        throw new Error(`Unexpected stroke-query reply (opcode 0x${opcode.toString(16)})`);
+    }
+    // payload must hold a 4-byte count + 6-byte timestamp (packet = 2 + 10)
+    if (reply.byteLength < 12) {
+        throw new Error(`Malformed stroke-query reply (${reply.byteLength} bytes, need 12)`);
+    }
+    const dv = new DataView(reply.buffer, reply.byteOffset);
+    const count = u32le(dv, 2);
+    const timestamp = bcdToTimestamp(new Uint8Array(reply.buffer, reply.byteOffset + 6, 6));
+    return { count, timestamp };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Nordic UART request/reply exchange
 // ─────────────────────────────────────────────────────────────────────────────
@@ -697,9 +752,10 @@ export async function syncDrawings(bleManager, deviceInfo, opts = {}) {
     const paperModeReply = await exchange(bleManager, OPCODE_SET_MODE, [MODE_PAPER]);
     checkAckReply(paperModeReply, 'paper mode');
 
-    // 8. Query available file count
+    // 8. Query available file count (validates opcode + guards against a short
+    // reply so "no drawings" can't crash with a DataView bounds error).
     const countReply = await exchange(bleManager, OPCODE_AVAILABLE_FILES, []);
-    const fileCount = countReply.getUint8(2) | (countReply.getUint8(3) << 8);
+    const fileCount = parseFileCount(countReply);
 
     const drawings = [];
 
@@ -710,11 +766,7 @@ export async function syncDrawings(bleManager, deviceInfo, opts = {}) {
         // BCD-encoded (not a raw little-endian integer) -- ports protocol.py's
         // MsgGetStrokesSlate._handle_reply.
         const strokesReply = await exchange(bleManager, OPCODE_GET_STROKES, []);
-        const strokesDv    = new DataView(strokesReply.buffer, strokesReply.byteOffset);
-        const strokeCount  = u32le(strokesDv, 2);
-        const timestamp    = bcdToTimestamp(
-            new Uint8Array(strokesReply.buffer, strokesReply.byteOffset + 6, 6)
-        );
+        const { timestamp } = parseGetStrokesReply(strokesReply);
 
         // 10-11. Subscribe, request download of oldest file, and accumulate
         // pen data chunks until the CRC-carrying end-of-download reply
