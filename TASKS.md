@@ -82,8 +82,10 @@ real hardware even now that the BLE-layer (GATT/notify) bugs are fixed.
         synced by the Python GUI (stroke count, shape, no corner spikes at 65535)
 
 - [ ] **Follow-ups from the same audit (non-blocking)**
-  - [ ] Validate reply opcodes for AVAILABLE_FILES (`0xc2`) and GET_STROKES (`0xcf`)
-        before parsing fields; raise a clear error on mismatch
+  - [x] Validate reply opcodes for AVAILABLE_FILES (`0xc2`) and GET_STROKES (`0xcf`)
+        before parsing fields; raise a clear error on mismatch (done in
+        `parseFileCount` / `parseGetStrokesReply` — also bounds-guards every field
+        read so a short "no drawings" ACK no longer crashes with a DataView error)
   - [ ] Don't send `SET_MODE idle` after sync — Python leaves the device in paper mode;
         idle may stop the tablet recording new offline drawings
   - [ ] Port `register_device_finish()` (Slate: set time, transfer-GATT select, name,
