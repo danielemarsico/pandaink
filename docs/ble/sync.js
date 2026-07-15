@@ -45,6 +45,21 @@ import {
 // queries it for real.
 const POINT_SIZE_UM = 10;
 
+// Slate/Folio tablet dimensions in points, used only as a fallback when the
+// device answers the dimension query with a bare ACK instead of the data reply
+// (ports the class defaults on WacomProtocolSlate in wacom_win.py).
+const SLATE_DEFAULT_WIDTH_PTS  = 21600;
+const SLATE_DEFAULT_HEIGHT_PTS = 14800;
+
+// Shown when the device genuinely rejects a command with INVALID_STATE (0x02).
+// Wording follows wacom_win.py's live_mode() message (solid green = ready) --
+// NOT the older, contradictory retrieve_data() text that said "blue".
+const DEVICE_NOT_READY_MSG =
+    'The device is not in sync mode. Press the button on the device until the ' +
+    'LED is solid green, then click Sync again.';
+
+const ERR_INVALID_STATE = 0x02;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Nordic UART packet helpers
 // ─────────────────────────────────────────────────────────────────────────────
@@ -108,9 +123,32 @@ function checkAckReply(reply, label) {
         throw new Error(`Unexpected reply to ${label} (opcode 0x${opcode.toString(16)})`);
     }
     const status = reply.getUint8(2);
+    if (status === ERR_INVALID_STATE) throw new Error(DEVICE_NOT_READY_MSG);
     if (status !== 0x00) {
         throw new Error(`Device rejected ${label} (error code 0x${status.toString(16)})`);
     }
+}
+
+// For a query that normally returns a dedicated data opcode but MAY instead be
+// answered with the generic ACK: in protocol.py's Msg.execute(), a 0xb3 reply
+// is ALWAYS accepted (success if payload byte 0 == 0x00, DeviceError otherwise)
+// and the command-specific handler only runs for non-0xb3 replies. Some devices
+// (e.g. a Bamboo Folio that has no real battery getter) just ACK these queries.
+// Returns true if `reply` carries the dedicated data payload (caller should
+// parse it), false if it was a bare ACK (success, no data). Throws on an ACK
+// error status or an unrecognized opcode.
+function checkDataOrAckReply(reply, dataOpcode, label) {
+    const opcode = reply.getUint8(0);
+    if (opcode === REPLY_ACK) {
+        const status = reply.getUint8(2);
+        if (status === ERR_INVALID_STATE) throw new Error(DEVICE_NOT_READY_MSG);
+        if (status !== 0x00) {
+            throw new Error(`Device rejected ${label} (error code 0x${status.toString(16)})`);
+        }
+        return false;
+    }
+    if (opcode === dataOpcode) return true;
+    throw new Error(`Unexpected reply to ${label} (opcode 0x${opcode.toString(16)})`);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -578,12 +616,14 @@ export async function syncDrawings(bleManager, deviceInfo, opts = {}) {
     const connectOpcode = connectReply.getUint8(0);
     if (connectOpcode === REPLY_ACK) {
         const status = connectReply.getUint8(2);
-        if (status === 0x02 /* INVALID_STATE */) {
-            throw new Error(
-                'Device is not ready to connect (invalid state). ' +
-                'Make sure the LED is blue -- press the button on the device to ' +
-                'switch it back from green if needed -- then try again.'
-            );
+        if (status === ERR_INVALID_STATE) {
+            // The device frequently reports INVALID_STATE on this initial
+            // connect even when it has drawings and is perfectly able to sync.
+            // wacom_win.py's live_mode() ignores exactly this and proceeds, so
+            // do the same here rather than aborting the whole sync: continue the
+            // handshake, and if the device really isn't ready a later step will
+            // surface DEVICE_NOT_READY_MSG.
+            console.warn('CONNECT returned INVALID_STATE; proceeding with sync anyway');
         } else if (status !== 0x00) {
             throw new Error(`Device rejected connection (error code 0x${status.toString(16)})`);
         }
@@ -601,33 +641,37 @@ export async function syncDrawings(bleManager, deviceInfo, opts = {}) {
     checkAckReply(setTimeReply, 'set time');
 
     // 3. Query battery (result currently unused, but the device expects this
-    // call as part of the handshake before it will honor file operations)
+    // call as part of the handshake before it will honor file operations). The
+    // battery getter isn't real on every device in this family -- some (e.g.
+    // Bamboo Folio) just answer with the generic 0xb3 ACK instead of the 0xba
+    // battery reply, which protocol.py accepts as success. Don't reject it.
     const batteryReply = await exchange(bleManager, OPCODE_GET_BATTERY, []);
-    if (batteryReply.getUint8(0) !== REPLY_GET_BATTERY) {
-        throw new Error(`Unexpected battery reply (opcode 0x${batteryReply.getUint8(0).toString(16)})`);
-    }
+    checkDataOrAckReply(batteryReply, REPLY_GET_BATTERY, 'battery');
 
     // 4. Query tablet dimensions (width=selector 3, height=selector 4);
     // point size has no real getter on this device family, so it's hardcoded
-    // (matches protocol.py's MsgGetPointSizeSpark).
+    // (matches protocol.py's MsgGetPointSizeSpark). If the device answers with a
+    // bare ACK instead of the 0xeb data reply, fall back to the Slate defaults.
     const widthReply  = await exchange(bleManager, OPCODE_GET_DIMENSIONS, [0x03, 0x00]);
     const heightReply = await exchange(bleManager, OPCODE_GET_DIMENSIONS, [0x04, 0x00]);
-    for (const [reply, label] of [[widthReply, 'width'], [heightReply, 'height']]) {
-        if (reply.getUint8(0) !== REPLY_GET_DIMENSIONS) {
-            throw new Error(`Unexpected ${label} reply (opcode 0x${reply.getUint8(0).toString(16)})`);
-        }
+    const widthHasData  = checkDataOrAckReply(widthReply,  REPLY_GET_DIMENSIONS, 'width');
+    const heightHasData = checkDataOrAckReply(heightReply, REPLY_GET_DIMENSIONS, 'height');
+    let dimensions;
+    if (widthHasData && heightHasData) {
+        const rawWidth  = u32le(new DataView(widthReply.buffer, widthReply.byteOffset), 4);
+        const rawHeight = u32le(new DataView(heightReply.buffer, heightReply.byteOffset), 4);
+        dimensions = [rawWidth * POINT_SIZE_UM, rawHeight * POINT_SIZE_UM];
+    } else {
+        console.warn('Device did not report dimensions; using Slate defaults');
+        dimensions = [SLATE_DEFAULT_WIDTH_PTS * POINT_SIZE_UM, SLATE_DEFAULT_HEIGHT_PTS * POINT_SIZE_UM];
     }
-    const rawWidth  = u32le(new DataView(widthReply.buffer, widthReply.byteOffset), 4);
-    const rawHeight = u32le(new DataView(heightReply.buffer, heightReply.byteOffset), 4);
-    const dimensions = [rawWidth * POINT_SIZE_UM, rawHeight * POINT_SIZE_UM];
 
     // 5. Query firmware version (two requests with different selectors;
-    // result currently unused, same handshake-order requirement as above)
+    // result currently unused, same handshake-order requirement as above, and
+    // the same generic-ACK tolerance as the battery query).
     for (const selector of [0, 1]) {
         const fwReply = await exchange(bleManager, OPCODE_GET_FIRMWARE, [selector]);
-        if (fwReply.getUint8(0) !== REPLY_GET_FIRMWARE) {
-            throw new Error(`Unexpected firmware reply (opcode 0x${fwReply.getUint8(0).toString(16)})`);
-        }
+        checkDataOrAckReply(fwReply, REPLY_GET_FIRMWARE, 'firmware');
     }
 
     // 6. Route offline data to the FFEE0003 GATT characteristic
