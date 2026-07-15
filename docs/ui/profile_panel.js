@@ -7,6 +7,9 @@ import {
 import {
     startGDriveAuth, isDriveConnected, disconnectDrive,
 } from '../auth/storage_oauth.js';
+import {
+    isSyncTraceEnabled, setSyncTraceEnabled, getSyncTraceLog, clearSyncTraceLog,
+} from '../ble/sync.js';
 
 export class ProfilePanel {
     constructor(user, onClose, onForgetDevice) {
@@ -99,6 +102,24 @@ export class ProfilePanel {
     </div>
   </section>
 
+  <section class="pp-section">
+    <h3 class="pp-section-title">Diagnostics</h3>
+    <label class="pp-toggle">
+      <input type="checkbox" id="pp-trace-toggle">
+      <span>Verbose sync log</span>
+    </label>
+    <p class="pp-muted pp-hint">Records the device sync conversation so it can be shared for debugging.
+       Turn it on, run Sync, then Copy the log below and send it over.</p>
+    <div class="pp-inline pp-trace-actions">
+      <button id="pp-trace-copy"    class="btn-small">Copy log</button>
+      <button id="pp-trace-refresh" class="btn-small">Refresh</button>
+      <button id="pp-trace-clear"   class="btn-small">Clear</button>
+    </div>
+    <textarea id="pp-trace-log" class="pp-trace-log" readonly rows="10"
+              placeholder="(no log yet — enable the switch, then run Sync)"></textarea>
+    <div id="pp-trace-msg" class="pp-msg" style="display:none"></div>
+  </section>
+
   <section class="pp-section pp-danger-zone">
     <button id="pp-signout" class="btn-danger-outline">Sign out</button>
   </section>
@@ -117,6 +138,55 @@ export class ProfilePanel {
             await signOut();
             this.close();
         });
+
+        // Diagnostics — verbose sync log
+        const toggle = q('#pp-trace-toggle');
+        if (toggle) {
+            toggle.checked = isSyncTraceEnabled();
+            toggle.addEventListener('change', () => {
+                setSyncTraceEnabled(toggle.checked);
+                this._showMsg('pp-trace-msg',
+                    toggle.checked ? 'Verbose log ON — run Sync, then Copy the log.'
+                                   : 'Verbose log off.', false);
+            });
+        }
+        q('#pp-trace-refresh')?.addEventListener('click', () => this._renderTraceLog());
+        q('#pp-trace-clear')?.addEventListener('click', () => {
+            clearSyncTraceLog();
+            this._renderTraceLog();
+        });
+        q('#pp-trace-copy')?.addEventListener('click', () => this._copyTraceLog());
+        this._renderTraceLog();
+    }
+
+    _renderTraceLog() {
+        const ta = this._el?.querySelector('#pp-trace-log');
+        if (ta) ta.value = getSyncTraceLog();
+    }
+
+    async _copyTraceLog() {
+        const text = getSyncTraceLog();
+        if (!text) { this._showMsg('pp-trace-msg', 'Log is empty — enable it and run Sync first.', true); return; }
+        let ok = false;
+        try {
+            await navigator.clipboard.writeText(text);
+            ok = true;
+        } catch {
+            // Fallback for browsers/contexts without the async clipboard API:
+            // select the textarea contents and use execCommand.
+            const ta = this._el?.querySelector('#pp-trace-log');
+            if (ta) {
+                ta.focus();
+                ta.select();
+                try { ok = document.execCommand('copy'); } catch { ok = false; }
+                ta.setSelectionRange(0, 0);
+                ta.blur();
+            }
+        }
+        this._showMsg('pp-trace-msg',
+            ok ? 'Log copied to clipboard.'
+               : 'Could not copy automatically — long-press the log box and Select All → Copy.',
+            !ok);
     }
 
     async _refresh() {
