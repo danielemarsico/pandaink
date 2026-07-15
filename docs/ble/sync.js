@@ -51,6 +51,15 @@ const POINT_SIZE_UM = 10;
 const SLATE_DEFAULT_WIDTH_PTS  = 21600;
 const SLATE_DEFAULT_HEIGHT_PTS = 14800;
 
+// Shown when the device genuinely rejects a command with INVALID_STATE (0x02).
+// Wording follows wacom_win.py's live_mode() message (solid green = ready) --
+// NOT the older, contradictory retrieve_data() text that said "blue".
+const DEVICE_NOT_READY_MSG =
+    'The device is not in sync mode. Press the button on the device until the ' +
+    'LED is solid green, then click Sync again.';
+
+const ERR_INVALID_STATE = 0x02;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Nordic UART packet helpers
 // ─────────────────────────────────────────────────────────────────────────────
@@ -114,6 +123,7 @@ function checkAckReply(reply, label) {
         throw new Error(`Unexpected reply to ${label} (opcode 0x${opcode.toString(16)})`);
     }
     const status = reply.getUint8(2);
+    if (status === ERR_INVALID_STATE) throw new Error(DEVICE_NOT_READY_MSG);
     if (status !== 0x00) {
         throw new Error(`Device rejected ${label} (error code 0x${status.toString(16)})`);
     }
@@ -131,6 +141,7 @@ function checkDataOrAckReply(reply, dataOpcode, label) {
     const opcode = reply.getUint8(0);
     if (opcode === REPLY_ACK) {
         const status = reply.getUint8(2);
+        if (status === ERR_INVALID_STATE) throw new Error(DEVICE_NOT_READY_MSG);
         if (status !== 0x00) {
             throw new Error(`Device rejected ${label} (error code 0x${status.toString(16)})`);
         }
@@ -605,12 +616,14 @@ export async function syncDrawings(bleManager, deviceInfo, opts = {}) {
     const connectOpcode = connectReply.getUint8(0);
     if (connectOpcode === REPLY_ACK) {
         const status = connectReply.getUint8(2);
-        if (status === 0x02 /* INVALID_STATE */) {
-            throw new Error(
-                'Device is not ready to connect (invalid state). ' +
-                'Make sure the LED is blue -- press the button on the device to ' +
-                'switch it back from green if needed -- then try again.'
-            );
+        if (status === ERR_INVALID_STATE) {
+            // The device frequently reports INVALID_STATE on this initial
+            // connect even when it has drawings and is perfectly able to sync.
+            // wacom_win.py's live_mode() ignores exactly this and proceeds, so
+            // do the same here rather than aborting the whole sync: continue the
+            // handshake, and if the device really isn't ready a later step will
+            // surface DEVICE_NOT_READY_MSG.
+            console.warn('CONNECT returned INVALID_STATE; proceeding with sync anyway');
         } else if (status !== 0x00) {
             throw new Error(`Device rejected connection (error code 0x${status.toString(16)})`);
         }
