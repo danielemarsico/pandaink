@@ -124,7 +124,10 @@ export class AppController {
             const el = overlay.querySelector('#auth-msg');
             el.textContent  = text;
             el.className    = 'auth-msg ' + (isErr ? 'auth-msg-error' : 'auth-msg-ok');
-            el.style.display = text ? '' : 'none';
+            // Use an explicit 'block' rather than '' — clearing the inline style
+            // would fall back to the stylesheet's `.auth-msg { display: none }`,
+            // leaving errors and the "Account created" confirmation invisible.
+            el.style.display = text ? 'block' : 'none';
         };
 
         overlay.querySelector('#auth-to-register').addEventListener('click', () => {
