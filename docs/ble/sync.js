@@ -165,10 +165,18 @@ function opcodeName(opcode) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function buildPacket(opcode, args) {
-    const data = new Uint8Array(2 + args.length);
+    // Wacom messages are never zero-length: a command with no arguments is still
+    // sent with a single 0x00 payload byte (length 1). protocol.py's Msg defaults
+    // `args = [0x00]` for exactly this reason -- its comment says "Empty messages
+    // don't exist". A genuinely empty payload (length 0) makes the device reject
+    // the reads that take no arguments (GET_BATTERY, AVAILABLE_FILES, GET_STROKES,
+    // DOWNLOAD_OLDEST, DELETE_OLDEST) with a generic 0x01 error, while every
+    // command that happens to carry >=1 argument byte works.
+    const payload = (args && args.length) ? args : new Uint8Array([0x00]);
+    const data = new Uint8Array(2 + payload.length);
     data[0] = opcode;
-    data[1] = args.length;
-    data.set(args, 2);
+    data[1] = payload.length;
+    data.set(payload, 2);
     return data;
 }
 
