@@ -452,8 +452,13 @@ export class AppController {
             await this._loadStoredDrawings();
 
         } catch (err) {
-            this._setStatus('Sync error: ' + err.message);
-            console.error(err);
+            if (err.code === 'DEVICE_NOT_READY') {
+                // Expected, recoverable state — present as guidance, not a crash.
+                this._setStatus(err.message);
+            } else {
+                this._setStatus('Sync error: ' + err.message);
+                console.error(err);
+            }
         } finally {
             btn.disabled = false;
         }

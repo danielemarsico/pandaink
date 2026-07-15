@@ -60,6 +60,16 @@ const DEVICE_NOT_READY_MSG =
 
 const ERR_INVALID_STATE = 0x02;
 
+// A device that isn't in the sync-authorized state accepts write commands
+// (set time / mode) but rejects the reads (battery, file count) -- so surface
+// one clear, actionable error rather than letting the caller crash on a later
+// step. Tagged with a code so the UI can present it as guidance, not a failure.
+function deviceNotReadyError() {
+    const err = new Error(DEVICE_NOT_READY_MSG);
+    err.code = 'DEVICE_NOT_READY';
+    return err;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Nordic UART packet helpers
 // ─────────────────────────────────────────────────────────────────────────────
@@ -123,7 +133,7 @@ function checkAckReply(reply, label) {
         throw new Error(`Unexpected reply to ${label} (opcode 0x${opcode.toString(16)})`);
     }
     const status = reply.getUint8(2);
-    if (status === ERR_INVALID_STATE) throw new Error(DEVICE_NOT_READY_MSG);
+    if (status === ERR_INVALID_STATE) throw deviceNotReadyError();
     if (status !== 0x00) {
         throw new Error(`Device rejected ${label} (error code 0x${status.toString(16)})`);
     }
@@ -151,7 +161,7 @@ function checkDataOrAckReply(reply, dataOpcode, label, optional = false) {
     if (opcode === REPLY_ACK) {
         const status = reply.getUint8(2);
         if (status === 0x00) return false;
-        if (status === ERR_INVALID_STATE) throw new Error(DEVICE_NOT_READY_MSG);
+        if (status === ERR_INVALID_STATE) throw deviceNotReadyError();
         if (optional) {
             console.warn(`Device rejected ${label} (error 0x${status.toString(16)}); continuing without it`);
             return false;
@@ -187,7 +197,7 @@ function parseFileCount(reply) {
     }
     if (opcode === REPLY_ACK) {
         const status = payloadByte(reply, 0);
-        if (status === ERR_INVALID_STATE) throw new Error(DEVICE_NOT_READY_MSG);
+        if (status === ERR_INVALID_STATE) throw deviceNotReadyError();
         if (status !== 0x00) {
             throw new Error(`Device rejected file-count query (error code 0x${status.toString(16)})`);
         }
@@ -206,7 +216,7 @@ function parseGetStrokesReply(reply) {
     if (opcode !== REPLY_GET_STROKES) {
         if (opcode === REPLY_ACK) {
             const status = payloadByte(reply, 0);
-            if (status === ERR_INVALID_STATE) throw new Error(DEVICE_NOT_READY_MSG);
+            if (status === ERR_INVALID_STATE) throw deviceNotReadyError();
             throw new Error(`Device rejected stroke query (error code 0x${status.toString(16)})`);
         }
         throw new Error(`Unexpected stroke-query reply (opcode 0x${opcode.toString(16)})`);
@@ -687,13 +697,14 @@ export async function syncDrawings(bleManager, deviceInfo, opts = {}) {
     if (connectOpcode === REPLY_ACK) {
         const status = connectReply.getUint8(2);
         if (status === ERR_INVALID_STATE) {
-            // The device frequently reports INVALID_STATE on this initial
-            // connect even when it has drawings and is perfectly able to sync.
-            // wacom_win.py's live_mode() ignores exactly this and proceeds, so
-            // do the same here rather than aborting the whole sync: continue the
-            // handshake, and if the device really isn't ready a later step will
-            // surface DEVICE_NOT_READY_MSG.
-            console.warn('CONNECT returned INVALID_STATE; proceeding with sync anyway');
+            // INVALID_STATE here means the device is not in the sync-authorized
+            // state: it will accept writes (set time/mode) but reject the reads
+            // (battery, file count) that the rest of retrieve_data depends on.
+            // The reference's retrieve_data() stops here and asks for a button
+            // press rather than pushing on (only live_mode() proceeds). Do the
+            // same -- fail fast with clear guidance instead of a later, cryptic
+            // "Device rejected …" from a read that can't work yet.
+            throw deviceNotReadyError();
         } else if (status !== 0x00) {
             throw new Error(`Device rejected connection (error code 0x${status.toString(16)})`);
         }
