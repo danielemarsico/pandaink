@@ -93,8 +93,39 @@ function traceEnabled() {
     }
 }
 
+// In-memory ring buffer of trace lines, so the log can be shown on-screen
+// (Profile → Diagnostics) on devices with no accessible dev console — e.g. a
+// phone running the sync.
+const TRACE_LOG_MAX = 4000;
+const _traceLog = [];
+
 function trace(...args) {
-    if (traceEnabled()) console.log('[sync]', ...args);
+    if (!traceEnabled()) return;
+    const line = '[sync] ' + args.map(String).join(' ');
+    console.log(line);
+    _traceLog.push(line);
+    if (_traceLog.length > TRACE_LOG_MAX) _traceLog.shift();
+}
+
+// ── Trace controls, used by the Profile → Diagnostics UI ─────────────────────
+
+export function isSyncTraceEnabled() {
+    return traceEnabled();
+}
+
+export function setSyncTraceEnabled(on) {
+    try {
+        if (on) localStorage.setItem('pandaink_sync_trace', '1');
+        else localStorage.removeItem('pandaink_sync_trace');
+    } catch { /* private mode / storage disabled — ignore */ }
+}
+
+export function getSyncTraceLog() {
+    return _traceLog.join('\n');
+}
+
+export function clearSyncTraceLog() {
+    _traceLog.length = 0;
 }
 
 // Format a Uint8Array / DataView / array as space-separated hex bytes.
