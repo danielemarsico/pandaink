@@ -20,9 +20,10 @@ import {
     handleGDriveCallback, isDriveConnected,
 } from '../auth/storage_oauth.js';
 
-import {
-    saveDrawing, getDrawingsByDevice, deleteDrawing,
-} from '../storage/gdrive_store.js';
+// Local IndexedDB store — always available, the source of truth for the UI.
+import * as localStore from '../storage/idb_store.js';
+// Google Drive store — optional cloud provider, used only when connected.
+import * as driveStore  from '../storage/gdrive_store.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AppController
@@ -405,27 +406,49 @@ export class AppController {
         try {
             await this._ensureBleConnected();
 
-            const connected = await isDriveConnected();
-            if (!connected) {
-                this._setStatus('Connect Google Drive in Profile → Cloud Storage first.');
-                return;
-            }
-
             const { drawings, dimensions } = await syncDrawings(this._ble, this._deviceInfo, {
                 onProgress: (done, total) => this._setStatus(`Syncing ${done}/${total}…`),
             });
 
+            // The device deletes each drawing as it is downloaded, so persist to
+            // the local store FIRST — before any cloud call — so a failed or
+            // absent cloud upload can never lose the only copy.
+            const driveOn = await this._isDriveOn();
+            let uploaded = 0;
+            let pending  = 0;
+
             for (const d of drawings) {
                 const record = {
-                    deviceId:   this._deviceInfo.id,
-                    timestamp:  d.timestamp,
+                    deviceId:    this._deviceInfo.id,
+                    timestamp:   d.timestamp,
                     dimensions,
-                    strokes:    d.strokes,
+                    strokes:     d.strokes,
+                    uploaded:    false,
+                    driveFileId: null,
                 };
-                await saveDrawing(record);
+                const id = await localStore.saveDrawing(record);
+
+                if (driveOn) {
+                    try {
+                        const saved = await driveStore.saveDrawing(record);
+                        await localStore.updateDrawing({
+                            ...record, id, uploaded: true, driveFileId: saved.driveFileId,
+                        });
+                        uploaded++;
+                    } catch (e) {
+                        // Keep the local copy; it stays pending for a later retry.
+                        console.warn('Cloud upload failed, kept locally:', e);
+                        pending++;
+                    }
+                }
             }
 
-            this._setStatus(`Synced ${drawings.length} drawing(s)`);
+            let status = `Synced ${drawings.length} drawing(s) — saved locally`;
+            if (driveOn) {
+                status += `; ${uploaded} uploaded to Drive`;
+                if (pending) status += `, ${pending} pending (upload failed, kept locally)`;
+            }
+            this._setStatus(status);
             await this._loadStoredDrawings();
 
         } catch (err) {
@@ -441,15 +464,53 @@ export class AppController {
     async _loadStoredDrawings() {
         if (!this._deviceInfo) return;
         try {
-            const connected = await isDriveConnected();
-            if (!connected) return;
             this._setStatus('Loading drawings…');
-            this._drawings = await getDrawingsByDevice(this._deviceInfo.id);
+            // Local store is the source of truth — always works, cloud or not.
+            this._drawings = await localStore.getDrawingsByDevice(this._deviceInfo.id);
             this._renderDrawingList();
-            if (this._drawings.length === 0) this._setStatus('No drawings yet.');
-            else this._setStatus(`${this._drawings.length} drawing(s) loaded.`);
+
+            const total = this._drawings.length;
+            if (total === 0) { this._setStatus('No drawings yet.'); return; }
+
+            // Only frame drawings as "pending cloud upload" when a cloud provider
+            // is actually connected — with no cloud, local IS the storage, not a
+            // waiting room. Retry any pending uploads in the background.
+            const pending = this._drawings.filter((d) => !d.uploaded).length;
+            if (pending && await this._isDriveOn()) {
+                this._setStatus(`${total} drawing(s) loaded (${pending} not yet in cloud).`);
+                this._retryPendingUploads();
+            } else {
+                this._setStatus(`${total} drawing(s) loaded.`);
+            }
         } catch (e) {
             this._setStatus('Could not load drawings: ' + e.message);
+        }
+    }
+
+    // Upload any locally-saved drawings that never made it to the cloud. Runs
+    // only when Drive is connected; failures are logged and left pending.
+    async _retryPendingUploads() {
+        for (const d of this._drawings) {
+            if (d.uploaded) continue;
+            try {
+                const saved = await driveStore.saveDrawing(d);
+                await localStore.updateDrawing({ ...d, uploaded: true, driveFileId: saved.driveFileId });
+                d.uploaded    = true;
+                d.driveFileId = saved.driveFileId;
+            } catch (e) {
+                console.warn('Pending upload retry failed:', e);
+            }
+        }
+    }
+
+    // Whether a cloud provider (Google Drive) is currently connected. Any error
+    // (offline, no Supabase session) is treated as "not connected" so the local
+    // flow keeps working.
+    async _isDriveOn() {
+        try {
+            return await isDriveConnected();
+        } catch {
+            return false;
         }
     }
 
@@ -525,10 +586,18 @@ export class AppController {
     }
 
     async _deleteDrawing(idx) {
-        if (!confirm('Permanently delete this drawing from Google Drive?')) return;
+        if (!confirm('Permanently delete this drawing?')) return;
         const drawing = this._drawings[idx];
         try {
-            await deleteDrawing(drawing.driveFileId);
+            if (drawing.id != null) await localStore.deleteDrawing(drawing.id);
+            // Also remove the cloud copy if there is one and Drive is connected.
+            if (drawing.driveFileId && await this._isDriveOn()) {
+                try {
+                    await driveStore.deleteDrawing(drawing.driveFileId);
+                } catch (e) {
+                    console.warn('Cloud delete failed (local copy removed):', e);
+                }
+            }
             this._drawings.splice(idx, 1);
             this._renderDrawingList();
         } catch (e) {

@@ -234,33 +234,44 @@ picks **exactly one** at a time.
   saving a new drawing must fail with a clear message telling the user to delete
   old drawings (or switch to Google Drive) — it must never silently drop a drawing.
 
-### Local temporary storage (loss protection) — REQUIRED
+### Local storage (IndexedDB) — always on, cloud is optional
 
 Device sync and cloud upload happen at **two different moments**, and the device
 **deletes each drawing from its own memory during sync** (`DELETE_OLDEST`, step 9e
 of the sync flow above). So between "taken from the device" and "confirmed saved in
 the cloud", the browser holds the only copy. Any remote failure in that window
 (Drive/Supabase outage, expired token, network drop, closed tab) would lose the
-drawing permanently.
+drawing permanently — and if **no cloud provider is configured at all**, there is
+no remote step to reach in the first place.
 
-Rule: the web app must persist every drawing **locally first** (IndexedDB —
-`docs/storage/idb_store.js` exists as unused legacy code and can be revived for
-this), and only treat it as safe once the cloud upload is confirmed:
+Rule: the local IndexedDB store (`docs/storage/idb_store.js`) is the **source of
+truth** for the drawings the app displays. Every synced drawing is written there
+**first**, before any cloud call, and stays there. Cloud upload is layered on top
+and is entirely optional:
 
 ```
-device sync → save to IndexedDB (immediately, before anything remote)
-            → upload to the active cloud provider
-            → upload confirmed → mark/remove the local copy
-            → upload failed  → keep local copy, show "pending upload" state,
-                                retry on next app load or manual retry
+device sync → save to IndexedDB (immediately, before anything remote)   ← always
+            → cloud provider connected?
+                 no  → done; drawing lives locally and is shown from IndexedDB
+                 yes → upload to the active provider (best-effort)
+                        → success → mark record uploaded (keep the local copy)
+                        → failure → leave it pending; retry on next load / sync
 ```
 
-- Drawings pending upload must survive a page reload (hence IndexedDB, not memory).
-- On app start, check for pending local drawings and retry their upload.
-- The local copy is a safety buffer, not a third storage provider: it holds only
-  drawings not yet confirmed in the cloud.
-- Status: 🔵 Planned — currently drawings go straight from sync to Drive with no
-  local buffer (loss window exists today).
+- The app works with **no cloud configuration** — sync, save, view, export, and
+  delete all function against IndexedDB alone.
+- Drawings (and their pending/uploaded state) survive a page reload — the drawing
+  list is rendered from IndexedDB on mount, before any BLE reconnect.
+- On app start, if a cloud provider is connected, pending (not-yet-uploaded)
+  drawings are retried in the background; a failed retry stays pending, never lost.
+- Local copies are retained even after a successful cloud upload, so the local
+  view keeps working offline and never depends on a remote round-trip.
+- Deleting a drawing removes the local copy (and the cloud copy too, if one exists
+  and the provider is connected).
+- Status: ✅ Implemented (`docs/storage/idb_store.js` + `app_controller.js`
+  `_cmdSync` / `_loadStoredDrawings` / `_deleteDrawing`). Not yet done: a
+  per-drawing "pending upload" badge in the UI (status text only for now), and
+  cross-device reconciliation of cloud-only drawings back into the local list.
 
 ---
 

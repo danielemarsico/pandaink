@@ -110,22 +110,28 @@ These steps require access to external dashboards. Instructions are also in `REA
 Do these **after** the BLE Protocol Critical Fixes above — nothing reaches storage
 until sync works.
 
-- [ ] **S1 — Local temporary storage (loss protection)** — REQUIRED per RULEBOOK.md.
-  The device deletes each drawing during sync (`DELETE_OLDEST`), so until the cloud
-  upload is confirmed the browser holds the only copy.
-  - [ ] Revive `docs/storage/idb_store.js` (currently unused legacy) as the local
-        pending-upload buffer: `savePending(drawing)`, `listPending()`,
-        `removePending(id)` — keyed by drawing timestamp, must survive page reloads
-  - [ ] Change the sync flow in `app_controller.js` `_cmdSync()`: save each drawing
+- [x] **S1 — Local storage (works with no cloud) + loss protection** — per RULEBOOK.md.
+  The device deletes each drawing during sync (`DELETE_OLDEST`), so the browser must
+  hold the drawing regardless of whether a cloud provider is configured. Local
+  IndexedDB is now the always-on source of truth; cloud is optional on top.
+  - [x] Revive `docs/storage/idb_store.js` (was unused legacy) as the local store;
+        added `updateDrawing()` (mark uploaded); records carry `uploaded` /
+        `driveFileId`, keyed by auto-id + `by_device` index, survive page reloads
+  - [x] Change the sync flow in `app_controller.js` `_cmdSync()`: save each drawing
         to IndexedDB **immediately after parsing, before any cloud call**; upload to
-        the active provider; remove the local copy only after the upload is confirmed
-  - [ ] On upload failure: keep the local copy, show a "pending upload" state in the
-        UI (per-drawing badge or toast), don't throw away the sync result
-  - [ ] On app start (`_mountApp`): check `listPending()` and retry uploading any
-        pending drawings; surface a visible indicator while retries are pending
-  - [ ] Manual retry affordance (button or automatic on Sync click)
-  - [ ] Test: simulate upload failure (revoke Drive token / go offline mid-sync) →
-        reload page → drawing still present and retried
+        Drive only when connected; on success mark the local record uploaded (local
+        copy retained for offline viewing)
+  - [x] Removed the hard `isDriveConnected()` gate that made sync/load bail with
+        "Connect Google Drive first" when no cloud was configured
+  - [x] `_loadStoredDrawings()` renders the drawing list from IndexedDB on mount
+        (before BLE reconnect), so drawings are visible with no cloud at all
+  - [x] On upload failure: keep the local copy, leave it pending (status text);
+        `_retryPendingUploads()` retries on next load/sync when Drive is connected
+  - [ ] Per-drawing "pending upload" badge/toast in the UI (currently status text only)
+  - [ ] Test on hardware: sync with no cloud → drawings appear and persist across
+        reload; then connect Drive → pending drawings upload
+  - [x] Verified in a headless browser (stubbed Supabase, Drive off): seeded local
+        drawings render as tabs, canvas draws, delete removes from UI + IndexedDB
 
 - [ ] **S2 — Supabase Storage provider (10-drawing cap)**
   - [ ] Decide bucket layout: private bucket `drawings`, path `<user_id>/<timestamp>.json`,
