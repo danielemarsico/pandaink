@@ -134,20 +134,35 @@ function checkAckReply(reply, label) {
 // is ALWAYS accepted (success if payload byte 0 == 0x00, DeviceError otherwise)
 // and the command-specific handler only runs for non-0xb3 replies. Some devices
 // (e.g. a Bamboo Folio that has no real battery getter) just ACK these queries.
+//
+// `optional` marks a handshake query whose *result is unused* (battery,
+// firmware) or has a fallback (dimensions). These are sent because the device
+// expects them in sequence, but some units answer with a plain device error
+// (e.g. GENERAL_ERROR 0x01 for an unsupported battery getter). Blocking the
+// whole offline-data retrieval on such a getter is wrong, so for optional
+// queries a device error is downgraded to a warning and treated as "no data".
+// A genuine INVALID_STATE (device not ready) is always surfaced, optional or not.
+//
 // Returns true if `reply` carries the dedicated data payload (caller should
-// parse it), false if it was a bare ACK (success, no data). Throws on an ACK
-// error status or an unrecognized opcode.
-function checkDataOrAckReply(reply, dataOpcode, label) {
+// parse it), false if it was a bare ACK / tolerated error (no data). Throws on
+// INVALID_STATE, or on a device error / unrecognized opcode for a required query.
+function checkDataOrAckReply(reply, dataOpcode, label, optional = false) {
     const opcode = reply.getUint8(0);
     if (opcode === REPLY_ACK) {
         const status = reply.getUint8(2);
+        if (status === 0x00) return false;
         if (status === ERR_INVALID_STATE) throw new Error(DEVICE_NOT_READY_MSG);
-        if (status !== 0x00) {
-            throw new Error(`Device rejected ${label} (error code 0x${status.toString(16)})`);
+        if (optional) {
+            console.warn(`Device rejected ${label} (error 0x${status.toString(16)}); continuing without it`);
+            return false;
         }
-        return false;
+        throw new Error(`Device rejected ${label} (error code 0x${status.toString(16)})`);
     }
     if (opcode === dataOpcode) return true;
+    if (optional) {
+        console.warn(`Unexpected ${label} reply (opcode 0x${opcode.toString(16)}); continuing without it`);
+        return false;
+    }
     throw new Error(`Unexpected reply to ${label} (opcode 0x${opcode.toString(16)})`);
 }
 
@@ -646,7 +661,7 @@ export async function syncDrawings(bleManager, deviceInfo, opts = {}) {
     // Bamboo Folio) just answer with the generic 0xb3 ACK instead of the 0xba
     // battery reply, which protocol.py accepts as success. Don't reject it.
     const batteryReply = await exchange(bleManager, OPCODE_GET_BATTERY, []);
-    checkDataOrAckReply(batteryReply, REPLY_GET_BATTERY, 'battery');
+    checkDataOrAckReply(batteryReply, REPLY_GET_BATTERY, 'battery', /* optional */ true);
 
     // 4. Query tablet dimensions (width=selector 3, height=selector 4);
     // point size has no real getter on this device family, so it's hardcoded
@@ -654,8 +669,8 @@ export async function syncDrawings(bleManager, deviceInfo, opts = {}) {
     // bare ACK instead of the 0xeb data reply, fall back to the Slate defaults.
     const widthReply  = await exchange(bleManager, OPCODE_GET_DIMENSIONS, [0x03, 0x00]);
     const heightReply = await exchange(bleManager, OPCODE_GET_DIMENSIONS, [0x04, 0x00]);
-    const widthHasData  = checkDataOrAckReply(widthReply,  REPLY_GET_DIMENSIONS, 'width');
-    const heightHasData = checkDataOrAckReply(heightReply, REPLY_GET_DIMENSIONS, 'height');
+    const widthHasData  = checkDataOrAckReply(widthReply,  REPLY_GET_DIMENSIONS, 'width',  /* optional */ true);
+    const heightHasData = checkDataOrAckReply(heightReply, REPLY_GET_DIMENSIONS, 'height', /* optional */ true);
     let dimensions;
     if (widthHasData && heightHasData) {
         const rawWidth  = u32le(new DataView(widthReply.buffer, widthReply.byteOffset), 4);
@@ -671,7 +686,7 @@ export async function syncDrawings(bleManager, deviceInfo, opts = {}) {
     // the same generic-ACK tolerance as the battery query).
     for (const selector of [0, 1]) {
         const fwReply = await exchange(bleManager, OPCODE_GET_FIRMWARE, [selector]);
-        checkDataOrAckReply(fwReply, REPLY_GET_FIRMWARE, 'firmware');
+        checkDataOrAckReply(fwReply, REPLY_GET_FIRMWARE, 'firmware', /* optional */ true);
     }
 
     // 6. Route offline data to the FFEE0003 GATT characteristic
