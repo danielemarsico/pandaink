@@ -1,4 +1,10 @@
-// W7 — IndexedDB CRUD for drawings and device configs.
+// IndexedDB CRUD for drawings — the always-on local store.
+//
+// This is the source of truth for the drawings shown in the app: every synced
+// drawing is written here first (loss protection — the device deletes each
+// drawing as it is downloaded), and stays here whether or not a cloud provider
+// is configured. Cloud upload, when connected, is layered on top and recorded
+// via the `uploaded` / `driveFileId` fields.
 //
 // Schema:
 //   DB name:    'pandaink'
@@ -9,7 +15,7 @@
 //     'devices'   — keyPath: 'id' (the Web Bluetooth device.id)
 //
 // Drawing record:
-//   { id?, deviceId, timestamp, dimensions, strokes }
+//   { id?, deviceId, timestamp, dimensions, strokes, uploaded?, driveFileId? }
 //   strokes: array of arrays of { x, y, p }
 //
 // Device record:
@@ -71,6 +77,11 @@ function tx(storeName, mode, fn) {
 /** Save a drawing record. Returns the auto-assigned id. */
 export function saveDrawing(drawing) {
     return tx('drawings', 'readwrite', (store) => store.add(drawing));
+}
+
+/** Update an existing drawing record in place (must carry its `id`). */
+export function updateDrawing(drawing) {
+    return tx('drawings', 'readwrite', (store) => store.put(drawing));
 }
 
 /** Retrieve all drawings for a specific device, ordered by timestamp ascending. */
