@@ -406,42 +406,47 @@ export class AppController {
         try {
             await this._ensureBleConnected();
 
-            const { drawings, dimensions } = await syncDrawings(this._ble, this._deviceInfo, {
-                onProgress: (done, total) => this._setStatus(`Syncing ${done}/${total}…`),
-            });
-
-            // The device deletes each drawing as it is downloaded, so persist to
-            // the local store FIRST — before any cloud call — so a failed or
-            // absent cloud upload can never lose the only copy.
             const driveOn = await this._isDriveOn();
+            let saved = 0;
             let uploaded = 0;
             let pending  = 0;
 
-            for (const d of drawings) {
-                const record = {
-                    deviceId:    this._deviceInfo.id,
-                    timestamp:   d.timestamp,
-                    dimensions,
-                    strokes:     d.strokes,
-                    uploaded:    false,
-                    driveFileId: null,
-                };
-                const id = await localStore.saveDrawing(record);
+            // Persist each drawing the instant it's parsed — inside the sync loop,
+            // BEFORE the device is told to delete it. The device only exposes the
+            // oldest file and deleting it is the only way to advance, so saving
+            // after the whole sync would risk losing every downloaded-but-unsaved
+            // drawing if anything failed partway. If saveDrawing throws, the error
+            // propagates and syncDrawings stops without deleting that file.
+            const { drawings } = await syncDrawings(this._ble, this._deviceInfo, {
+                onProgress: (done, total) => this._setStatus(`Syncing ${done}/${total}…`),
+                onDrawing: async (d) => {
+                    const record = {
+                        deviceId:    this._deviceInfo.id,
+                        timestamp:   d.timestamp,
+                        dimensions:  d.dimensions,
+                        strokes:     d.strokes,
+                        uploaded:    false,
+                        driveFileId: null,
+                    };
+                    const id = await localStore.saveDrawing(record);
+                    saved++;
+                    this._setStatus(`Saved ${saved} drawing(s)…`);
 
-                if (driveOn) {
-                    try {
-                        const saved = await driveStore.saveDrawing(record);
-                        await localStore.updateDrawing({
-                            ...record, id, uploaded: true, driveFileId: saved.driveFileId,
-                        });
-                        uploaded++;
-                    } catch (e) {
-                        // Keep the local copy; it stays pending for a later retry.
-                        console.warn('Cloud upload failed, kept locally:', e);
-                        pending++;
+                    if (driveOn) {
+                        try {
+                            const up = await driveStore.saveDrawing(record);
+                            await localStore.updateDrawing({
+                                ...record, id, uploaded: true, driveFileId: up.driveFileId,
+                            });
+                            uploaded++;
+                        } catch (e) {
+                            // Local copy is safe; leave it pending for a later retry.
+                            console.warn('Cloud upload failed, kept locally:', e);
+                            pending++;
+                        }
                     }
-                }
-            }
+                },
+            });
 
             let status = `Synced ${drawings.length} drawing(s) — saved locally`;
             if (driveOn) {

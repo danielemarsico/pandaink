@@ -780,11 +780,15 @@ function parseDelta(data, pos, maskByte, x, y, p, dx, dy, dp) {
  * @param {object}     [opts]
  * @param {boolean}    [opts.deleteAfterSync=true] - Delete each file from device after download.
  * @param {function}   [opts.onProgress]           - Called with (downloadedCount, totalCount).
+ * @param {function}   [opts.onDrawing]            - async ({ timestamp, strokes, dimensions }),
+ *        awaited after each file is parsed and BEFORE it is deleted from the device. Use it to
+ *        persist the drawing; if it throws, the sync stops without deleting that file (so it is
+ *        not lost). Drawings persisted on earlier iterations remain saved.
  * @returns {Promise<{drawings: Array, dimensions: [number, number]}>}
  *          drawings: array of { timestamp, strokes }; dimensions: [width, height] in µm.
  */
 export async function syncDrawings(bleManager, deviceInfo, opts = {}) {
-    const { deleteAfterSync = true, onProgress } = opts;
+    const { deleteAfterSync = true, onProgress, onDrawing } = opts;
     const { uuid } = deviceInfo;
     const uuidBytes = hexBytes(uuid);
 
@@ -896,18 +900,43 @@ export async function syncDrawings(bleManager, deviceInfo, opts = {}) {
         // sends the trigger itself, after subscribing).
         const penData = await readOfflinePenData(bleManager);
 
-        // 12. Parse binary stroke data
+        // 12. Parse binary stroke data.
+        let strokes = null;
         try {
-            const { strokes } = parseStrokeFile(penData);
+            ({ strokes } = parseStrokeFile(penData));
             const pts = strokes.reduce((n, s) => n + s.length, 0);
             trace(`  parsed ${strokes.length} stroke(s), ${pts} point(s)`);
-            drawings.push({ timestamp, strokes });
         } catch (e) {
+            // Corrupt/unparseable file: there's nothing to save. Log it and let
+            // it be deleted below so the sync can advance to the next file
+            // (matches the reference, whose parse_pen_data returns None but still
+            // deletes). This is not the loss-protection case — there's no data.
             console.warn('Failed to parse drawing:', e);
             trace(`  parse FAILED: ${e.message}; raw pen data [${hex(penData)}]`);
         }
 
-        // 13. Delete file from device
+        // 12b. Persist the drawing BEFORE deleting it from the device. The device
+        // only exposes the oldest file and DELETE_OLDEST is the sole way to reach
+        // the next one, so a crash between download and save would lose the
+        // drawing permanently. If persisting fails, stop the sync WITHOUT deleting
+        // so the file stays on the device for a later retry (loss protection,
+        // RULEBOOK.md). Drawings saved on earlier iterations are already safe.
+        if (strokes) {
+            const drawing = { timestamp, strokes };
+            try {
+                if (onDrawing) await onDrawing({ ...drawing, dimensions });
+            } catch (e) {
+                trace(`  persist FAILED: ${e.message}; stopping before delete to avoid data loss`);
+                throw new Error(
+                    `Saved ${drawings.length} drawing(s); could not save the next one locally, so ` +
+                    `it was left on the device rather than deleted. (${e.message})`
+                );
+            }
+            drawings.push(drawing);
+        }
+
+        // 13. Delete file from device (only now that it's safely persisted, or it
+        // was unparseable and there's nothing to keep).
         if (deleteAfterSync) {
             const deleteReply = await exchange(bleManager, OPCODE_DELETE_OLDEST, []);
             checkAckReply(deleteReply, 'delete file');

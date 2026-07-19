@@ -119,10 +119,13 @@ until sync works.
   - [x] Revive `docs/storage/idb_store.js` (was unused legacy) as the local store;
         added `updateDrawing()` (mark uploaded); records carry `uploaded` /
         `driveFileId`, keyed by auto-id + `by_device` index, survive page reloads
-  - [x] Change the sync flow in `app_controller.js` `_cmdSync()`: save each drawing
-        to IndexedDB **immediately after parsing, before any cloud call**; upload to
-        Drive only when connected; on success mark the local record uploaded (local
-        copy retained for offline viewing)
+  - [x] Change the sync flow so each drawing is saved to IndexedDB **inside the
+        sync loop, immediately after parsing and BEFORE the device delete**
+        (`syncDrawings` `onDrawing` callback → `app_controller._cmdSync`), not after
+        the whole sync; upload to Drive only when connected; on success mark the
+        local record uploaded (local copy retained for offline viewing). A failed
+        local save stops the sync before deleting that file, so a multi-drawing
+        sync can't lose downloaded-but-unsaved files
   - [x] Removed the hard `isDriveConnected()` gate that made sync/load bail with
         "Connect Google Drive first" when no cloud was configured
   - [x] `_loadStoredDrawings()` renders the drawing list from IndexedDB on mount
