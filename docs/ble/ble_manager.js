@@ -13,7 +13,8 @@ export class BleManager {
     constructor() {
         this._device = null;
         this._server = null;
-        this._service = null;
+        this._service = null;      // Nordic UART service (kept for convenience)
+        this._services = [];       // every discovered service we resolve chars against
         this._characteristics = new Map();
         this._notifyHandlers = new Map();
         this._disconnectHandler = null;
@@ -47,7 +48,27 @@ export class BleManager {
         this._notifyHandlers.clear();
 
         this._server = await this._device.gatt.connect();
-        this._service = await this._server.getPrimaryService(NORDIC_UART_SERVICE_UUID);
+
+        // Characteristics live across MULTIPLE services: the command channel is
+        // in the Nordic UART service (6e400001), but the offline pen-data
+        // characteristic (ffee0003) is in the Wacom offline service (ffee0001),
+        // and live data is in yet another. Resolving every characteristic
+        // against a single service fails with "No Characteristics matching UUID
+        // … found in Service …". Discover each service the device exposes and
+        // resolve characteristics against all of them.
+        this._services = [];
+        for (const svcUuid of [
+            NORDIC_UART_SERVICE_UUID,
+            WACOM_OFFLINE_SERVICE_UUID,
+            WACOM_LIVE_SERVICE_UUID,
+            SYSEVENT_NOTIFICATION_SERVICE_UUID,
+        ]) {
+            try {
+                this._services.push(await this._server.getPrimaryService(svcUuid));
+            } catch { /* device doesn't expose this service — skip it */ }
+        }
+        // Keep the Nordic UART service reference for callers that expect it.
+        this._service = this._services[0] ?? null;
 
         return {
             name: this._device.name,
@@ -68,6 +89,7 @@ export class BleManager {
         }
         this._server = null;
         this._service = null;
+        this._services = [];
         this._characteristics.clear();
         this._notifyHandlers.clear();
     }
@@ -76,9 +98,22 @@ export class BleManager {
         if (this._characteristics.has(uuid)) {
             return this._characteristics.get(uuid);
         }
-        const char = await this._service.getCharacteristic(uuid);
-        this._characteristics.set(uuid, char);
-        return char;
+        // The characteristic may live in any of the discovered services, so try
+        // each until one has it (getCharacteristic throws when it doesn't).
+        let lastErr;
+        for (const service of this._services) {
+            try {
+                const char = await service.getCharacteristic(uuid);
+                this._characteristics.set(uuid, char);
+                return char;
+            } catch (e) {
+                lastErr = e;
+            }
+        }
+        throw new Error(
+            `Characteristic ${uuid} not found in any discovered service`
+            + (lastErr ? ` (${lastErr.message})` : '')
+        );
     }
 
     async readCharacteristic(uuid) {
