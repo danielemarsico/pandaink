@@ -540,14 +540,28 @@ export class AppController {
 
         this._drawings.forEach((d, idx) => {
             const ts  = new Date(d.timestamp * 1000).toLocaleString();
-            const tab = document.createElement('button');
+            const tab = document.createElement('div');
             tab.className   = 'tab-btn';
-            tab.textContent = ts + ' ×';
             tab.dataset.idx = idx;
-            tab.addEventListener('click', (e) => {
-                if (e.target.textContent.endsWith('×')) this._closeTab(idx);
-                else this._selectTab(idx);
+
+            // Selecting and closing are separate targets: a single button whose
+            // whole label ended with "×" made every tap close the tab.
+            const label = document.createElement('span');
+            label.className   = 'tab-label';
+            label.textContent = ts;
+            label.addEventListener('click', () => this._selectTab(idx));
+
+            const close = document.createElement('span');
+            close.className   = 'tab-close';
+            close.textContent = '×';
+            close.title       = 'Close tab';
+            close.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this._closeTab(idx);
             });
+
+            tab.appendChild(label);
+            tab.appendChild(close);
             tabList.appendChild(tab);
         });
 

@@ -487,6 +487,16 @@ footer .footer-links {
   font-weight: 600;
 }
 
+.tab-label { cursor: pointer; }
+.tab-close {
+  margin-left: 0.5rem;
+  padding: 0 0.2rem;
+  cursor: pointer;
+  color: #999;
+  font-weight: 700;
+}
+.tab-close:hover { color: #c0392b; }
+
 .tab-content {
   border: 1px solid #ddd;
   border-top: none;

@@ -93,9 +93,10 @@ real hardware even now that the BLE-layer (GATT/notify) bugs are fixed.
   - [ ] Make live.js ACK-check CONNECT and SET_MODE instead of fire-and-forget
   - [ ] Fix the fire-and-forget `stopNotify()` race in register.js `waitForNotification()`
         (same bug already fixed in sync.js `exchange()`)
-  - [ ] Audit units: Python multiplies coords by point size (10 µm) and normalizes
-        pressure to 16-bit; JS returns raw device units — check drawing_canvas.js /
-        svg_export.js scaling
+  - [x] Audit units: Python multiplies coords by point size (10 µm) and normalizes
+        pressure to 16-bit; JS returned raw device units — fixed in `sync.js`
+        `scaleStrokes()` (coords × point size → µm to match `dimensions`, pressure
+        → 16-bit). Without it, synced drawings rendered as an invisible speck
 
 ### External Setup (manual — must be done before the web app works)
 
