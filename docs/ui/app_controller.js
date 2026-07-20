@@ -419,6 +419,8 @@ export class AppController {
             // propagates and syncDrawings stops without deleting that file.
             const { drawings } = await syncDrawings(this._ble, this._deviceInfo, {
                 onProgress: (done, total) => this._setStatus(`Syncing ${done}/${total}…`),
+                onConnectWait: (secondsLeft) =>
+                    this._setStatus(`Press the button on the device (LED solid green) to start sync… (${secondsLeft}s)`),
                 onDrawing: async (d) => {
                     const record = {
                         deviceId:    this._deviceInfo.id,

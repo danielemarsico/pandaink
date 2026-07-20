@@ -772,6 +772,49 @@ function parseDelta(data, pos, maskByte, x, y, p, dx, dy, dp) {
 // High-level sync flow
 // ─────────────────────────────────────────────────────────────────────────────
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// How long to keep retrying CONNECT while the device is in INVALID_STATE,
+// waiting for the user to press the button so it enters the sync-ready state.
+const CONNECT_WAIT_MS   = 25000;
+const CONNECT_RETRY_MS  = 1500;
+
+// Connect / authenticate with the device, retrying while it reports
+// INVALID_STATE. Right after drawing the pad is in its active state and rejects
+// a data connection with INVALID_STATE until the button is pressed (LED back to
+// solid green). Rather than failing on the first try, keep re-sending CONNECT
+// for CONNECT_WAIT_MS so the moment the user presses the button the sync
+// proceeds -- mirrors how registration waits for a button press. `onConnectWait`
+// (optional) is called on each retry so the UI can prompt the user.
+async function connectAuthorized(bleManager, uuidBytes, onConnectWait) {
+    const deadline = Date.now() + CONNECT_WAIT_MS;
+    while (true) {
+        const reply = await exchange(bleManager, OPCODE_CONNECT, Array.from(uuidBytes));
+        const opcode = reply.getUint8(0);
+
+        if (opcode === REPLY_ACK) {
+            const status = reply.getUint8(2);
+            if (status === 0x00) return;                         // authenticated
+            if (status === ERR_INVALID_STATE) {
+                if (Date.now() >= deadline) throw deviceNotReadyError();
+                const secondsLeft = Math.max(1, Math.round((deadline - Date.now()) / 1000));
+                trace(`CONNECT INVALID_STATE — waiting for button press (${secondsLeft}s left)`);
+                if (onConnectWait) onConnectWait(secondsLeft);
+                await sleep(CONNECT_RETRY_MS);
+                continue;
+            }
+            throw new Error(`Device rejected connection (error code 0x${status.toString(16)})`);
+        } else if (opcode === REPLY_CONNECT_OK) {
+            return;
+        } else if (opcode === REPLY_CONNECT_FAIL) {
+            const reason = reply.getUint8(2 + 6); // after the 6-byte echoed uuid
+            throw new Error(`Device rejected connection (reason 0x${reason.toString(16)})`);
+        } else {
+            throw new Error(`Unexpected connect reply (opcode 0x${opcode.toString(16)})`);
+        }
+    }
+}
+
 /**
  * Sync all offline drawings from the device.
  *
@@ -784,11 +827,14 @@ function parseDelta(data, pos, maskByte, x, y, p, dx, dy, dp) {
  *        awaited after each file is parsed and BEFORE it is deleted from the device. Use it to
  *        persist the drawing; if it throws, the sync stops without deleting that file (so it is
  *        not lost). Drawings persisted on earlier iterations remain saved.
+ * @param {function}   [opts.onConnectWait]        - Called with (secondsLeft) on each CONNECT
+ *        retry while the device is in INVALID_STATE, so the UI can prompt the user to press the
+ *        device button. After ~25s of INVALID_STATE the sync fails with the device-not-ready error.
  * @returns {Promise<{drawings: Array, dimensions: [number, number]}>}
  *          drawings: array of { timestamp, strokes }; dimensions: [width, height] in µm.
  */
 export async function syncDrawings(bleManager, deviceInfo, opts = {}) {
-    const { deleteAfterSync = true, onProgress, onDrawing } = opts;
+    const { deleteAfterSync = true, onProgress, onDrawing, onConnectWait } = opts;
     const { uuid } = deviceInfo;
     const uuidBytes = hexBytes(uuid);
 
@@ -803,30 +849,7 @@ export async function syncDrawings(bleManager, deviceInfo, opts = {}) {
     // (0xb3), where the payload's first byte is 0x00 on success or a device
     // error code otherwise -- ports protocol.py's Msg.execute() 0xb3
     // dispatch. Only Intuos Pro devices reply with raw 0x50/0x51 instead.
-    const connectReply = await exchange(bleManager, OPCODE_CONNECT, Array.from(uuidBytes));
-    const connectOpcode = connectReply.getUint8(0);
-    if (connectOpcode === REPLY_ACK) {
-        const status = connectReply.getUint8(2);
-        if (status === ERR_INVALID_STATE) {
-            // INVALID_STATE here means the device is not in the sync-authorized
-            // state: it will accept writes (set time/mode) but reject the reads
-            // (battery, file count) that the rest of retrieve_data depends on.
-            // The reference's retrieve_data() stops here and asks for a button
-            // press rather than pushing on (only live_mode() proceeds). Do the
-            // same -- fail fast with clear guidance instead of a later, cryptic
-            // "Device rejected …" from a read that can't work yet.
-            throw deviceNotReadyError();
-        } else if (status !== 0x00) {
-            throw new Error(`Device rejected connection (error code 0x${status.toString(16)})`);
-        }
-    } else if (connectOpcode === REPLY_CONNECT_OK) {
-        // success
-    } else if (connectOpcode === REPLY_CONNECT_FAIL) {
-        const reason = connectReply.getUint8(2 + 6); // after the 6-byte echoed uuid
-        throw new Error(`Device rejected connection (reason 0x${reason.toString(16)})`);
-    } else {
-        throw new Error(`Unexpected connect reply (opcode 0x${connectOpcode.toString(16)})`);
-    }
+    await connectAuthorized(bleManager, uuidBytes, onConnectWait);
 
     // 2. Set device clock to current UTC time
     const setTimeReply = await exchange(bleManager, OPCODE_SET_TIME, Array.from(bcdTimeBytes(new Date())));
