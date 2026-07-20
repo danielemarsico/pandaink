@@ -45,6 +45,29 @@ import {
 // queries it for real.
 const POINT_SIZE_UM = 10;
 
+// Device max pen pressure, used to normalize raw pressure to a 16-bit range
+// (ports wacom_win.py's normalize() = 0x10000 * p / self.pressure). This is the
+// Slate/Folio value (WacomProtocolSlate.pressure); Spark is 1023, Intuos Pro 8192.
+const DEVICE_PRESSURE_MAX = 2047;
+const NORMALIZED_PRESSURE = 0x10000;
+
+// Scale a freshly-parsed drawing's points to match the units the renderer and
+// SVG export expect. Ports wacom_win.py parse_pen_data():
+//   - coordinates: device points × point size, so they share the µm unit of the
+//     `dimensions` field (without this the strokes are ~10× too small and render
+//     as an invisible speck in a corner);
+//   - pressure: normalized to a 16-bit range (drawing_canvas.js / svg_export.js
+//     both assume 0..0x10000, centred on 0x8000).
+function scaleStrokes(strokes) {
+    for (const stroke of strokes) {
+        for (const pt of stroke) {
+            pt.x *= POINT_SIZE_UM;
+            pt.y *= POINT_SIZE_UM;
+            pt.p = Math.round(NORMALIZED_PRESSURE * pt.p / DEVICE_PRESSURE_MAX);
+        }
+    }
+}
+
 // Slate/Folio tablet dimensions in points, used only as a fallback when the
 // device answers the dimension query with a bare ACK instead of the data reply
 // (ports the class defaults on WacomProtocolSlate in wacom_win.py).
@@ -927,6 +950,7 @@ export async function syncDrawings(bleManager, deviceInfo, opts = {}) {
         let strokes = null;
         try {
             ({ strokes } = parseStrokeFile(penData));
+            scaleStrokes(strokes);   // device points → µm, pressure → 16-bit
             const pts = strokes.reduce((n, s) => n + s.length, 0);
             trace(`  parsed ${strokes.length} stroke(s), ${pts} point(s)`);
         } catch (e) {
