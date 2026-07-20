@@ -58,52 +58,60 @@ export class DrawingCanvas {
         ctx.scale(scale, scale);
 
         for (const stroke of this._drawing.strokes) {
-            this._renderStroke(ctx, stroke, srcW, srcH);
+            this._renderStroke(ctx, stroke, srcW, srcH, scale);
         }
 
         ctx.restore();
     }
 
-    _renderStroke(ctx, points, srcW, srcH) {
+    _project(x, y, srcW, srcH) {
+        // Orientation transform (matches DrawingCanvas in tuhi_gui.py)
+        if (this._orientation === 'portrait') {
+            return [srcW - y, x];
+        } else if (this._orientation === 'reverse-landscape') {
+            return [srcW - x, srcH - y];
+        } else if (this._orientation === 'reverse-portrait') {
+            return [y, srcH - x];
+        }
+        return [x, y]; // landscape = identity
+    }
+
+    _renderStroke(ctx, points, srcW, srcH, scale) {
         if (!points || points.length < 2) return;
 
-        let lastWidth = null;
+        ctx.strokeStyle = 'black';
+        ctx.lineCap     = 'round';
+        ctx.lineJoin    = 'round';
+
+        // Coordinates are in the same (µm) space as `dimensions`, which spans
+        // hundreds of thousands of units, and the context is scaled by `scale`
+        // (~0.0015) to fit the canvas. A line width given in those units would
+        // therefore collapse to a sub-pixel — invisible — line. Express the
+        // desired ON-SCREEN pixel width and divide by `scale` so the ctx.scale()
+        // transform renders it at that pixel size.
+        let [px, py] = this._project(points[0].x, points[0].y, srcW, srcH);
         ctx.beginPath();
+        ctx.moveTo(px, py);
+        let curWidth = null;
 
-        for (let i = 0; i < points.length; i++) {
-            let { x, y, p } = points[i];
+        for (let i = 1; i < points.length; i++) {
+            const pressure = Math.min(1, Math.max(0, points[i].p / NORMALIZED_RANGE));
+            const width    = (0.75 + pressure * 1.75) / scale;   // ~0.75–2.5 px on screen
+            const [x, y]   = this._project(points[i].x, points[i].y, srcW, srcH);
 
-            // Apply orientation transform (matches DrawingCanvas in tuhi_gui.py)
-            if (this._orientation === 'portrait') {
-                [x, y] = [srcW - y, x];
-            } else if (this._orientation === 'reverse-landscape') {
-                x = srcW - x;
-                y = srcH - y;
-            } else if (this._orientation === 'reverse-portrait') {
-                [x, y] = [y, srcH - x];
+            if (curWidth === null) curWidth = width;
+            if (width !== curWidth) {
+                ctx.lineWidth = curWidth;
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(px, py);
+                curWidth = width;
             }
-
-            // Pressure → line width (matches DrawingCanvas)
-            const pressure  = p / NORMALIZED_RANGE;
-            const lineWidth = pressure * 2 + 0.5;
-
-            if (i === 0) {
-                ctx.moveTo(x, y);
-            } else {
-                if (lineWidth !== lastWidth) {
-                    ctx.stroke();
-                    ctx.beginPath();
-                    ctx.moveTo(x, y);
-                    ctx.lineWidth  = lineWidth;
-                    ctx.strokeStyle = 'black';
-                    ctx.lineCap    = 'round';
-                    ctx.lineJoin   = 'round';
-                }
-                ctx.lineTo(x, y);
-            }
-            lastWidth = lineWidth;
+            ctx.lineTo(x, y);
+            px = x; py = y;
         }
 
+        ctx.lineWidth = curWidth ?? (1.5 / scale);
         ctx.stroke();
     }
 }
