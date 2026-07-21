@@ -13,7 +13,7 @@ class_name = "LiveSession"
 
 [[migrations]]
 tag = "v1"
-new_classes = ["LiveSession"]
+new_sqlite_classes = ["LiveSession"]
 
 # Secrets (DO NOT put these here — set with `wrangler secret put <NAME>`):
 #   GOOGLE_CLIENT_ID

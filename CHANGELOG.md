@@ -7,6 +7,17 @@ Format: `## Unreleased` for pending changes; `## <version> — <date>` for relea
 
 ## Unreleased
 
+- feat: move the Google Drive OAuth "authorize" step server-side — the Worker now exposes
+  `GET /oauth/google/authorize`, which builds the Google consent-screen URL using the Client ID
+  (a Worker secret) and redirects the browser to it. `docs/auth/storage_oauth.js` no longer ships
+  any Google client_id/secret or the legacy no-Worker fallback path; Drive backup now requires the
+  Worker
+- feat: add `docs/thanks.html`, the post-purchase redirect page for the Ko-fi Pro shop item —
+  confirms the purchase and explains the email-match unlock without claiming to verify anything
+  client-side
+- fix: `worker/wrangler.toml`'s Durable Object migration used `new_classes`, which Cloudflare's
+  free plan rejects (Durable Objects there must be SQLite-backed); switched to
+  `new_sqlite_classes` so the Worker deploys successfully
 - docs: add a privacy policy page (`docs/privacy.html`) covering account/device/drawing data, cloud provider access (with the Google API Services Limited Use disclosure for the `drive.appdata` scope), payments via Ko-fi, live-sharing, third-party services, and data deletion — required for Google OAuth verification. Linked from every page footer
 - feat: implement the three-tier cloud storage model — a new `docs/storage/cloud_store.js` abstraction picks the active provider from `profiles.storage_provider` and gates the paid ones on `profiles.plan`. Adds `supabase_store.js` (free tier, private bucket, 10-drawing cap enforced client-side), `dropbox_store.js` + `dropbox_oauth.js` (paid, secretless PKCE), and keeps `gdrive_store.js` (paid). New migrations `003_plan.sql` (adds `profiles.plan`, RLS blocks self-upgrade) and `004_storage.sql` (private `drawings` bucket + owner RLS)
 - feat: cloud sync is now auto-in-background plus a manual "Sync now" — uploads after each device sync, retries pending on load, and reconciles cloud-only drawings (from other devices) into the local list. Each drawing tab shows a cloud badge (☁✓ synced / ☁↑ pending / ● local)

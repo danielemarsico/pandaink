@@ -33,6 +33,34 @@ function text(body, env, status = 200) {
 
 // ── Google OAuth ────────────────────────────────────────────────────────────────
 
+const GOOGLE_AUTH_ENDPOINT = 'https://accounts.google.com/o/oauth2/v2/auth';
+const GDRIVE_SCOPE         = 'https://www.googleapis.com/auth/drive.appdata';
+
+// Builds the Google authorize URL server-side (client_id never ships to the
+// browser bundle) and redirects the browser straight to Google's consent
+// screen. The frontend only ever supplies the PKCE challenge + state.
+function googleAuthorize(req, env) {
+    const url = new URL(req.url);
+    const codeChallenge = url.searchParams.get('code_challenge');
+    const state          = url.searchParams.get('state');
+    const redirectUri     = url.searchParams.get('redirect_uri') || env.GOOGLE_REDIRECT_URI;
+    if (!codeChallenge || !state) return text('Missing code_challenge or state', env, 400);
+
+    const params = new URLSearchParams({
+        client_id:             env.GOOGLE_CLIENT_ID,
+        redirect_uri:          redirectUri,
+        response_type:         'code',
+        scope:                 GDRIVE_SCOPE,
+        code_challenge:        codeChallenge,
+        code_challenge_method: 'S256',
+        access_type:           'offline',
+        prompt:                'consent',
+        state,
+    });
+
+    return Response.redirect(`${GOOGLE_AUTH_ENDPOINT}?${params.toString()}`, 302);
+}
+
 async function googleToken(req, env) {
     const { code, code_verifier, redirect_uri } = await req.json();
     const body = new URLSearchParams({
@@ -199,6 +227,7 @@ export default {
         try {
             if (pathname === '/health') return json({ ok: true }, env);
 
+            if (request.method === 'GET'  && pathname === '/oauth/google/authorize') return googleAuthorize(request, env);
             if (request.method === 'POST' && pathname === '/oauth/google/token')   return googleToken(request, env);
             if (request.method === 'POST' && pathname === '/oauth/google/refresh') return googleRefresh(request, env);
             if (request.method === 'POST' && pathname === '/account/delete')       return deleteAccount(request, env);

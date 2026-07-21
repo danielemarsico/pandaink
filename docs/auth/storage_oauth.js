@@ -1,31 +1,20 @@
 // Google Drive OAuth flow (authorization code + PKCE) + token persistence in Supabase.
 //
+// This app requires the Cloudflare Worker backend (see worker/README.md).
+// GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET live only as Worker secrets
+// (`wrangler secret put ...`) — neither ever ships in this public JS bundle.
+// The Worker builds the Google authorize URL server-side (`/oauth/google/authorize`)
+// and does the token exchange/refresh (`/oauth/google/token`, `/oauth/google/refresh`).
+//
 // Setup required in Google Cloud Console:
 //   1. Enable the Google Drive API.
 //   2. Create an OAuth 2.0 Web application client.
-//   3. Add authorized JS origin:  https://danielemarsico.github.io
-//   4. Add authorized redirect URI: https://danielemarsico.github.io/pandaink/app.html
-//   5. Paste the client_id and client_secret below.
-//
-// Note: Google requires client_secret on the token/refresh requests for Web
-// application clients even when PKCE is used — PKCE is an addition here, not
-// a replacement for the secret. This secret ships in the public JS bundle
-// (same tradeoff as the Supabase anon key); PKCE still binds it to a specific
-// consent + single-use code, which is the standard accepted tradeoff for a
-// static site with no backend to hold a true confidential secret.
+//   3. Add authorized redirect URI: https://danielemarsico.github.io/pandaink/app.html
+//   4. Set GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GOOGLE_REDIRECT_URI as Worker secrets.
 
 import { supabase } from './supabase_client.js';
 import { WORKER_BASE_URL, hasWorker } from '../config.js';
 
-// GDRIVE_CLIENT_ID is public and used for the browser authorize redirect.
-// GDRIVE_CLIENT_SECRET is only used by the LEGACY no-backend fallback below;
-// once WORKER_BASE_URL is set, the secret lives in the Worker and this stays ''.
-export const GDRIVE_CLIENT_ID     = '';
-export const GDRIVE_CLIENT_SECRET = '';
-
-const GDRIVE_SCOPE        = 'https://www.googleapis.com/auth/drive.appdata';
-const TOKEN_ENDPOINT      = 'https://oauth2.googleapis.com/token';
-const AUTH_ENDPOINT       = 'https://accounts.google.com/o/oauth2/v2/auth';
 const REDIRECT_URI        = window.location.origin + window.location.pathname;
 const PROVIDER            = 'google_drive';
 const VERIFIER_KEY        = 'pandaink_gdrive_verifier';
@@ -52,6 +41,8 @@ async function generateCodeChallenge(verifier) {
 // ── OAuth redirect ────────────────────────────────────────────────────────────
 
 export async function startGDriveAuth() {
+    if (!hasWorker()) throw new Error('Google Drive requires the Worker backend (WORKER_BASE_URL not configured).');
+
     const verifier   = generateCodeVerifier();
     const challenge  = await generateCodeChallenge(verifier);
     const state      = base64url(crypto.getRandomValues(new Uint8Array(16)));
@@ -60,18 +51,13 @@ export async function startGDriveAuth() {
     sessionStorage.setItem(GDRIVE_STATE_KEY, state);
 
     const params = new URLSearchParams({
-        client_id:             GDRIVE_CLIENT_ID,
-        redirect_uri:          REDIRECT_URI,
-        response_type:         'code',
-        scope:                 GDRIVE_SCOPE,
         code_challenge:        challenge,
         code_challenge_method: 'S256',
-        access_type:           'offline',
-        prompt:                'consent',
+        redirect_uri:          REDIRECT_URI,
         state,
     });
 
-    window.location.href = AUTH_ENDPOINT + '?' + params.toString();
+    window.location.href = `${WORKER_BASE_URL}/oauth/google/authorize?${params.toString()}`;
 }
 
 // ── Callback handler ──────────────────────────────────────────────────────────
@@ -89,35 +75,16 @@ export async function handleGDriveCallback() {
     const verifier = sessionStorage.getItem(VERIFIER_KEY);
     if (!verifier) throw new Error('PKCE verifier missing from sessionStorage');
 
-    // Exchange code for tokens. Preferred path: the Cloudflare Worker holds the
-    // client_secret and does the exchange server-side. Fallback (no Worker
-    // configured): the legacy in-browser exchange using the shipped secret.
-    let tokens;
-    if (hasWorker()) {
-        const res = await fetch(`${WORKER_BASE_URL}/oauth/google/token`, {
-            method:  'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body:    JSON.stringify({ code, code_verifier: verifier, redirect_uri: REDIRECT_URI }),
-        });
-        if (!res.ok) throw new Error(`Drive token exchange failed: ${await res.text()}`);
-        tokens = await res.json();
-    } else {
-        const body = new URLSearchParams({
-            client_id:     GDRIVE_CLIENT_ID,
-            client_secret: GDRIVE_CLIENT_SECRET,
-            redirect_uri:  REDIRECT_URI,
-            grant_type:    'authorization_code',
-            code,
-            code_verifier: verifier,
-        });
-        const res = await fetch(TOKEN_ENDPOINT, {
-            method:  'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body:    body.toString(),
-        });
-        if (!res.ok) throw new Error(`Drive token exchange failed: ${await res.text()}`);
-        tokens = await res.json();
-    }
+    if (!hasWorker()) throw new Error('Google Drive requires the Worker backend (WORKER_BASE_URL not configured).');
+
+    // The Worker holds the client_secret and does the exchange server-side.
+    const res = await fetch(`${WORKER_BASE_URL}/oauth/google/token`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ code, code_verifier: verifier, redirect_uri: REDIRECT_URI }),
+    });
+    if (!res.ok) throw new Error(`Drive token exchange failed: ${await res.text()}`);
+    const tokens = await res.json();
     await _saveTokens(tokens);
 
     // Clean up URL and session
@@ -168,31 +135,15 @@ export async function getValidAccessToken() {
     // Refresh if expiring within 60 seconds
     if (new Date(data.expires_at).getTime() - Date.now() < 60_000) {
         if (!data.refresh_token) throw new Error('Drive access expired. Please reconnect Google Drive.');
+        if (!hasWorker()) throw new Error('Google Drive requires the Worker backend (WORKER_BASE_URL not configured).');
 
-        let refreshed;
-        if (hasWorker()) {
-            const res = await fetch(`${WORKER_BASE_URL}/oauth/google/refresh`, {
-                method:  'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body:    JSON.stringify({ refresh_token: data.refresh_token }),
-            });
-            if (!res.ok) throw new Error('Drive token refresh failed. Please reconnect Google Drive.');
-            refreshed = await res.json();
-        } else {
-            const body = new URLSearchParams({
-                client_id:     GDRIVE_CLIENT_ID,
-                client_secret: GDRIVE_CLIENT_SECRET,
-                grant_type:    'refresh_token',
-                refresh_token: data.refresh_token,
-            });
-            const res = await fetch(TOKEN_ENDPOINT, {
-                method:  'POST',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body:    body.toString(),
-            });
-            if (!res.ok) throw new Error('Drive token refresh failed. Please reconnect Google Drive.');
-            refreshed = await res.json();
-        }
+        const res = await fetch(`${WORKER_BASE_URL}/oauth/google/refresh`, {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({ refresh_token: data.refresh_token }),
+        });
+        if (!res.ok) throw new Error('Drive token refresh failed. Please reconnect Google Drive.');
+        const refreshed = await res.json();
         await _saveTokens({ ...refreshed, refresh_token: data.refresh_token });
         return refreshed.access_token;
     }

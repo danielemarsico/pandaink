@@ -11,3 +11,4 @@ build/PandaInk/
 *.log
 .env
 .claude/settings.local.json
+worker/.wrangler/

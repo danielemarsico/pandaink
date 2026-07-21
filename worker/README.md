@@ -9,6 +9,7 @@ The frontend (GitHub Pages) never holds a secret; it calls this Worker.
 | Method | Path | Purpose |
 |---|---|---|
 | GET  | `/health` | health check |
+| GET  | `/oauth/google/authorize` | builds the Google authorize URL server-side (holds Client ID) and redirects the browser |
 | POST | `/oauth/google/token` | exchange a Drive auth code (holds Google secret) |
 | POST | `/oauth/google/refresh` | refresh a Drive access token |
 | POST | `/account/delete` | delete the caller's account (Bearer = Supabase token) |

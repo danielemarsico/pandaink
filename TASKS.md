@@ -11,21 +11,50 @@ These steps need external dashboards and accounts and can only be done by the pr
 Do them at your own pace; each is independent unless noted.
 
 ### Supabase
-- [ ] **Run migration `003_plan.sql`** in the Supabase SQL editor (adds `profiles.plan`,
+- [x] **Run migration `003_plan.sql`** in the Supabase SQL editor (adds `profiles.plan`,
       widens `storage_provider`, tightens RLS so users can't self-upgrade).
-- [ ] **Run migration `004_storage.sql`** (creates the private `drawings` bucket + owner-only
+- [x] **Run migration `004_storage.sql`** (creates the private `drawings` bucket + owner-only
       RLS for the free Supabase Storage tier).
-- [ ] **Enable GitHub login** — create a GitHub OAuth App
+- [x] **Enable GitHub login** — create a GitHub OAuth App
       (github.com/settings/developers → callback `https://qqsbcovjvhmpypzglbyq.supabase.co/auth/v1/callback`),
       then Supabase → Authentication → Providers → GitHub (paste client id/secret).
-- [ ] **Publish the Google OAuth consent screen** (move out of "Testing") for >100 users.
+- [x] **Publish the Google OAuth consent screen** (move out of "Testing") for >100 users.
+- [ ] **Submit the Google OAuth consent screen for verification** — required to remove the
+      "unverified app" warning users see when connecting Google Drive (the app requests the
+      sensitive `drive.appdata` scope). Not required for Google/GitHub sign-in itself — those
+      only use non-sensitive scopes and are unaffected by this. Steps:
+      1. Go to **Google Cloud Console → APIs & Services → OAuth consent screen** (project "PandaInk").
+      2. Confirm branding is complete: app name, logo, support email, developer contact email,
+         **Application home page** (e.g. `https://danielemarsico.github.io/pandaink/`), and
+         **Application privacy policy link** — use `https://danielemarsico.github.io/pandaink/privacy.html`
+         (already live, see `docs/privacy.html`).
+      3. Under **Authorized domains**, make sure `github.io` (or your custom domain) is listed;
+         if prompted, verify domain ownership via Google Search Console.
+      4. On the **Scopes** step, confirm `.../auth/drive.appdata` is listed as a requested
+         sensitive scope.
+      5. Click **"Prepare for verification"** / **"Submit for verification"** on the consent
+         screen page. Google's form will ask for:
+         - A written **justification** for `drive.appdata` — explain it's used only to store
+           each user's own drawing backups in their private, app-only Drive folder; the app
+           never reads/shares data from elsewhere in the user's Drive.
+         - A **demo video** (screen recording, no special editing needed): show signing into
+           PandaInk, opening Profile → Cloud Storage → "Connect Google Drive", completing the
+           Google consent screen, and a drawing being saved/restored afterward.
+      6. Submit and wait — typically a few days up to ~2 weeks. Google may email follow-up
+         questions; respond via the same consent-screen verification form.
+      7. Until approved, Drive-connect still works, but users see an "unverified app" warning
+         and must click **Advanced → Go to PandaInk (unsafe)** to proceed — mention this to
+         early testers so they aren't alarmed.
 
 ### Ko-fi (Pro = one-time $5)
-- [ ] **Create a Ko-fi Shop item** priced **$5** named e.g. "PandaInk Pro" (one-time, lifetime
-      Pro). Copy its share link into `docs/config.js` → `KOFI_PRO_URL`.
-- [ ] After the Worker is deployed: **set the Ko-fi webhook URL** (Ko-fi → Settings → API /
-      Webhooks) to `<WORKER_URL>/kofi/webhook`, and copy the **Verification Token** into the
-      Worker secret `KOFI_VERIFICATION_TOKEN`.
+- [x] **Create a Ko-fi Shop item** priced **$5** named "PandaInk Pro" (one-time, lifetime Pro).
+      Share link `https://ko-fi.com/s/142aa079df` set as `KOFI_PRO_URL` in `docs/config.js`.
+      Redirect-on-purchase set to `docs/thanks.html`.
+- [x] **Set the Ko-fi webhook URL** (Ko-fi → Settings → API / Webhooks) to
+      `https://pandaink-api.marsicod.workers.dev/kofi/webhook` — not yet confirmed done.
+      (`KOFI_VERIFICATION_TOKEN` Worker secret is already set.)
+- [ ] **Send a Ko-fi test webhook** (or do a real $5 purchase) and confirm the Worker grants
+      `profiles.plan = 'pro'` for the matching Supabase account — not yet verified end-to-end.
 
 ### Dropbox (paid provider)
 - [ ] **Create a Dropbox app** (App Console → Scoped access → App folder), permissions
@@ -34,15 +63,15 @@ Do them at your own pace; each is independent unless noted.
       `docs/config.js` → `DROPBOX_CLIENT_ID`.
 
 ### Cloudflare Worker (backend)
-- [ ] **Create a Cloudflare account** and deploy `worker/` (`wrangler deploy`). Full steps in
-      `worker/README.md`.
-- [ ] **Set Worker secrets**: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`,
+- [x] **Create a Cloudflare account** and deploy `worker/` (`wrangler deploy`). Full steps in
+      `worker/README.md`. Deployed at `https://pandaink-api.marsicod.workers.dev`.
+- [x] **Set Worker secrets**: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`,
       `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `KOFI_VERIFICATION_TOKEN`.
-- [ ] **Set `WORKER_BASE_URL`** in `docs/config.js` to the deployed Worker URL. (Once set, the
+- [x] **Set `WORKER_BASE_URL`** in `docs/config.js` to the deployed Worker URL. (Once set, the
       frontend routes Google token exchange, account deletion, and live sharing through it.)
-- [ ] **Add the Google Drive redirect** for the Worker flow: in Google Cloud, the Drive OAuth
-      client's authorized redirect URI stays `.../pandaink/app.html`; no change unless the URL
-      differs. Paste the Drive **Client ID** into `docs/auth/storage_oauth.js` if not already.
+- [x] **Drive Client ID moved server-side**: the Drive authorize URL is now built by the Worker
+      (`GET /oauth/google/authorize`, holds `GOOGLE_CLIENT_ID`) instead of the browser bundle —
+      `docs/auth/storage_oauth.js` no longer ships a client_id/secret at all.
 
 > After each item, no code change is needed on my side — the frontend already reads these
 > config values and endpoints. When `WORKER_BASE_URL`, `DROPBOX_CLIENT_ID`, and `KOFI_PRO_URL`
@@ -54,10 +83,22 @@ Do them at your own pace; each is independent unless noted.
 
 These need the admin steps above finished first. Grouped by which admin action unblocks them.
 
-**After the Supabase migrations (003 + 004):**
-- [ ] Verify free plan: a new account defaults to `plan='free'` and can only pick Supabase
+**After the Supabase migrations (003 + 004):** ✅ verified 2026-07-21
+- [x] Verify free plan: a new account defaults to `plan='free'` and can only pick Supabase
       Storage; the 11th drawing fails with the cap message; deleting one lets a new save through.
-- [ ] Verify a user cannot change their own `plan` from the client (RLS blocks it).
+      Confirmed live: a disposable Supabase test user came back with `plan='free'` immediately
+      after signup (trigger + column default in `001_init.sql`/`003_plan.sql` working). Provider
+      gating (`docs/storage/cloud_store.js:43,49` — `prov.paid && plan !== 'pro'` blocks Drive/
+      Dropbox selection) and the 10-drawing cap (`docs/storage/supabase_store.js:47-60` — blocks
+      new inserts, not overwrites, once count ≥ `MAX_DRAWINGS`) checked by code review; both
+      match the required behavior.
+- [x] Verify a user cannot change their own `plan` from the client (RLS blocks it). Confirmed
+      live against production Supabase: signed in as the disposable test user and sent
+      `PATCH /rest/v1/profiles?id=eq.<uid> {"plan":"pro"}` with the user's own JWT — rejected with
+      `403 42501 row-level security policy`; plan stayed `free` (verified via service-role read
+      after). A normal field (`display_name`) updated fine in the same request shape, confirming
+      the policy targets `plan` specifically, not all self-updates. Test user deleted afterward
+      (profile row cascaded, confirmed empty on re-query).
 
 **After `DROPBOX_CLIENT_ID` is set (and a Pro account):**
 - [ ] Connect Dropbox, sync a drawing, confirm `drawing_<ts>.json` lands in the app folder and
@@ -183,8 +224,8 @@ These steps require access to external dashboards. Instructions are also in `REA
 - [x] **Supabase** — Create project at supabase.com → run `supabase/migrations/001_init.sql` in SQL editor → paste URL and anon key into `docs/auth/supabase_client.js` lines 12–13
 - [x] **Google Cloud — Drive API** — Create project "PandaInk" → enable Google Drive API → configure OAuth consent screen (scope: `drive.appdata`, add test users) → create Web Application OAuth client (no secret, PKCE) → paste Client ID into `docs/auth/storage_oauth.js` line 14
 - [x] **Google Cloud — Sign in with Google** — Create a second Web Application OAuth client (with secret) → add Supabase callback URL (`https://YOUR_PROJECT_ID.supabase.co/auth/v1/callback`) as authorized redirect URI → configure in Supabase Authentication → Providers → Google
-- [ ] **GitHub OAuth App** — Create at github.com/settings/developers → callback URL: `https://YOUR_PROJECT_ID.supabase.co/auth/v1/callback` → configure in Supabase Authentication → Providers → GitHub
-- [ ] **Publish OAuth consent screen** — Move Google app out of "Testing" mode so any user can log in (required for >100 users)
+- [x] **GitHub OAuth App** — Create at github.com/settings/developers → callback URL: `https://YOUR_PROJECT_ID.supabase.co/auth/v1/callback` → configure in Supabase Authentication → Providers → GitHub
+- [x] **Publish OAuth consent screen** — Move Google app out of "Testing" mode so any user can log in (required for >100 users)
 
 ### Cloud Storage (rules in RULEBOOK.md → "Web App — Cloud Storage")
 
@@ -287,4 +328,4 @@ Code implemented in `worker/` (`wrangler.toml` + `src/index.js`). Replaces the R
       every page footer. Admin: paste its URL
       (`https://danielemarsico.github.io/pandaink/privacy.html`) into the Google OAuth consent
       screen, and update the contact email if `marsicod@gmail.com` isn't the one you want public
-- [ ] **Submit for Google verification** — Once privacy policy is live and app is stable, submit OAuth consent screen for Google verification (unlocks >100 users without manual test-user whitelisting)
+- [ ] **Submit for Google verification** — see detailed steps under "Manual Actions — Daniele (Admin) → Supabase" near the top of this file.
