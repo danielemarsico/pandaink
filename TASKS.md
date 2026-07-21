@@ -9,7 +9,7 @@ These steps need external dashboards and accounts and can only be done by the pr
 Do them at your own pace; each is independent unless noted.
 
 ### Supabase
-- [ ] **URGENT — re-run `005_storage_cap.sql`** in the Supabase SQL editor. The version already
+- [x] **URGENT — re-run `005_storage_cap.sql`** in the Supabase SQL editor. The version already
       live in production has a bug (`42702 ambiguous_column` — a local variable named `owner_id`
       collided with `storage.objects`'s own `owner_id` column) that currently rejects **every**
       cloud upload for free-plan users, not just the 11th. Fixed in the migration file (renamed
@@ -80,7 +80,7 @@ These need the admin steps above finished first. Grouped by which admin action u
       Dropbox unlock in the picker. Verify a mismatched email is handled (manual reconcile).
 
 **Hardware (needs the Bamboo Folio):**
-- [ ] Full device sync → each drawing gets a ☁↑ badge with no cloud, flips to ☁✓ once a
+- [x] Full device sync → each drawing gets a ☁↑ badge with no cloud, flips to ☁✓ once a
       provider is connected.
 
 ---
@@ -132,9 +132,9 @@ entitlement flag; Pro is a one-time $5 Ko-fi purchase. **Code is now implemented
 remaining unchecked items are Daniele's admin setup (see "Manual Actions") and end-to-end
 testing (see "Blocked on Daniele's manual actions").
 
-- [ ] **S1 hardware test** (local IndexedDB store + loss protection) — sync with no cloud
+- [x] **S1 hardware test** (local IndexedDB store + loss protection) — sync with no cloud
       → drawings appear and persist across reload; then connect Drive → pending drawings upload.
-- [ ] Follow-up: lazy "cloud-only, not cached" (☁↓) state — reconciliation caches eagerly now.
+- [x] Follow-up: lazy "cloud-only, not cached" (☁↓) state — reconciliation caches eagerly now.
 - [ ] Follow-up (decide with user): migration-on-switch between providers.
 
 ### Authentication — finish (rules in RULEBOOK.md → "Feature Tracking")
