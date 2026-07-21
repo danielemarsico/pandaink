@@ -15,7 +15,11 @@
 // static site with no backend to hold a true confidential secret.
 
 import { supabase } from './supabase_client.js';
+import { WORKER_BASE_URL, hasWorker } from '../config.js';
 
+// GDRIVE_CLIENT_ID is public and used for the browser authorize redirect.
+// GDRIVE_CLIENT_SECRET is only used by the LEGACY no-backend fallback below;
+// once WORKER_BASE_URL is set, the secret lives in the Worker and this stays ''.
 export const GDRIVE_CLIENT_ID     = '';
 export const GDRIVE_CLIENT_SECRET = '';
 
@@ -85,28 +89,35 @@ export async function handleGDriveCallback() {
     const verifier = sessionStorage.getItem(VERIFIER_KEY);
     if (!verifier) throw new Error('PKCE verifier missing from sessionStorage');
 
-    // Exchange code for tokens
-    const body = new URLSearchParams({
-        client_id:     GDRIVE_CLIENT_ID,
-        client_secret: GDRIVE_CLIENT_SECRET,
-        redirect_uri:  REDIRECT_URI,
-        grant_type:    'authorization_code',
-        code,
-        code_verifier: verifier,
-    });
-
-    const res = await fetch(TOKEN_ENDPOINT, {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body:    body.toString(),
-    });
-
-    if (!res.ok) {
-        const text = await res.text();
-        throw new Error(`Drive token exchange failed: ${text}`);
+    // Exchange code for tokens. Preferred path: the Cloudflare Worker holds the
+    // client_secret and does the exchange server-side. Fallback (no Worker
+    // configured): the legacy in-browser exchange using the shipped secret.
+    let tokens;
+    if (hasWorker()) {
+        const res = await fetch(`${WORKER_BASE_URL}/oauth/google/token`, {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({ code, code_verifier: verifier, redirect_uri: REDIRECT_URI }),
+        });
+        if (!res.ok) throw new Error(`Drive token exchange failed: ${await res.text()}`);
+        tokens = await res.json();
+    } else {
+        const body = new URLSearchParams({
+            client_id:     GDRIVE_CLIENT_ID,
+            client_secret: GDRIVE_CLIENT_SECRET,
+            redirect_uri:  REDIRECT_URI,
+            grant_type:    'authorization_code',
+            code,
+            code_verifier: verifier,
+        });
+        const res = await fetch(TOKEN_ENDPOINT, {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body:    body.toString(),
+        });
+        if (!res.ok) throw new Error(`Drive token exchange failed: ${await res.text()}`);
+        tokens = await res.json();
     }
-
-    const tokens = await res.json();
     await _saveTokens(tokens);
 
     // Clean up URL and session
@@ -158,22 +169,30 @@ export async function getValidAccessToken() {
     if (new Date(data.expires_at).getTime() - Date.now() < 60_000) {
         if (!data.refresh_token) throw new Error('Drive access expired. Please reconnect Google Drive.');
 
-        const body = new URLSearchParams({
-            client_id:     GDRIVE_CLIENT_ID,
-            client_secret: GDRIVE_CLIENT_SECRET,
-            grant_type:    'refresh_token',
-            refresh_token: data.refresh_token,
-        });
-
-        const res = await fetch(TOKEN_ENDPOINT, {
-            method:  'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body:    body.toString(),
-        });
-
-        if (!res.ok) throw new Error('Drive token refresh failed. Please reconnect Google Drive.');
-
-        const refreshed = await res.json();
+        let refreshed;
+        if (hasWorker()) {
+            const res = await fetch(`${WORKER_BASE_URL}/oauth/google/refresh`, {
+                method:  'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body:    JSON.stringify({ refresh_token: data.refresh_token }),
+            });
+            if (!res.ok) throw new Error('Drive token refresh failed. Please reconnect Google Drive.');
+            refreshed = await res.json();
+        } else {
+            const body = new URLSearchParams({
+                client_id:     GDRIVE_CLIENT_ID,
+                client_secret: GDRIVE_CLIENT_SECRET,
+                grant_type:    'refresh_token',
+                refresh_token: data.refresh_token,
+            });
+            const res = await fetch(TOKEN_ENDPOINT, {
+                method:  'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body:    body.toString(),
+            });
+            if (!res.ok) throw new Error('Drive token refresh failed. Please reconnect Google Drive.');
+            refreshed = await res.json();
+        }
         await _saveTokens({ ...refreshed, refresh_token: data.refresh_token });
         return refreshed.access_token;
     }

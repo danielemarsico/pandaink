@@ -33,8 +33,10 @@ Four ways to connect to the tablet are planned; three exist today.
 
 ### 3. Web app
 - Fully static frontend on GitHub Pages using the Web Bluetooth API (`docs/ble/`).
-- Auth via Supabase (email/password, Google, GitHub); drawings stored in the user's
-  Google Drive `appDataFolder`; device registration stored in Supabase.
+- Auth via Supabase (email/password, Google, GitHub); device registration stored in Supabase.
+- Drawings live locally (IndexedDB, always on) plus one **tiered** cloud provider:
+  **Supabase Storage** (free, max 10 drawings) or **Google Drive** / **Dropbox** (paid).
+  See "Web App — Cloud Storage" for the tier and sync rules.
 - Feature parity target with the desktop app: register, sync offline drawings, live mode, SVG export.
 - Currently being validated against real Bamboo Folio hardware.
 
@@ -214,25 +216,91 @@ Concatenated download chunks form one file per drawing:
 
 ## Web App — Cloud Storage
 
-Where synced drawings live after they leave the device. Two providers; the user
-picks **exactly one** at a time.
+Where synced drawings live after they leave the device. Three cloud providers behind a
+**free/paid tier model**; the user picks **exactly one** at a time (local IndexedDB is
+always on underneath — see below).
 
-| Provider | Location | Limit | Status |
-|---|---|---|---|
-| Google Drive | user's own Drive, `appDataFolder` (hidden, app-private), one `drawing_<timestamp>.json` per drawing | none (user's Drive quota) | ✅ Implemented (`docs/storage/gdrive_store.js`) |
-| Supabase Storage | app-owned Supabase project, per-user bucket/folder | **max 10 drawings per user** | 🔵 Planned — no code yet |
+| Provider | Tier | Location | Limit | Status |
+|---|---|---|---|---|
+| Supabase Storage | **Free** | app-owned Supabase project, private bucket `drawings`, path `<user_id>/<timestamp>.json` | **max 10 drawings per user** | ✅ Code done (`docs/storage/supabase_store.js`); needs migration `004_storage.sql` run |
+| Google Drive | **Pro (paid)** | user's own Drive, `appDataFolder` (hidden, app-private), one `drawing_<timestamp>.json` per drawing | none (user's Drive quota) | ✅ Code done (`docs/storage/gdrive_store.js`); token exchange routes through the Worker |
+| Dropbox | **Pro (paid)** | user's own Dropbox, app folder | none (user's Dropbox quota) | ✅ Code done (`docs/storage/dropbox_store.js`); secretless PKCE, no Worker needed |
+
+All three implement one interface behind `docs/storage/cloud_store.js`, which picks the active
+provider from `profiles.storage_provider` and gates the paid ones on `profiles.plan`.
+
+### Tier / entitlement rules
+
+- Each user has a plan stored in `profiles.plan` = `free` | `pro` (default `free`).
+- **Free** users may only select **Supabase Storage** (10-drawing cap).
+- **Pro** users may select **Supabase Storage, Google Drive, or Dropbox**.
+- Gating is an **entitlement flag** — `profiles.plan = 'pro'` unlocks the paid providers.
+  Payments run through **Ko-fi** (`https://ko-fi.com/dan1elsan`); see "Pro unlock via Ko-fi".
+- The Supabase Storage **10-drawing cap** is enforced when saving: at the cap, saving a new
+  drawing must fail with a clear message telling the user to delete old drawings (or upgrade
+  to a paid provider) — it must **never silently drop a drawing**.
 
 ### Provider selection rules
 
-- The user chooses their storage provider in Profile → Cloud Storage.
+- The user chooses their storage provider in Profile → Cloud Storage (paid providers are
+  shown but locked for free-plan users).
 - **Only one provider can be active at a time.** The choice is stored in
-  `profiles.storage_provider` (Supabase) and can be changed later.
-- Switching providers does not automatically migrate existing drawings; drawings
-  stay where they were saved. (Migration on switch is a possible future feature —
-  decide before implementing Supabase Storage.)
-- Supabase Storage enforces the 10-drawing cap per user: when the cap is reached,
-  saving a new drawing must fail with a clear message telling the user to delete
-  old drawings (or switch to Google Drive) — it must never silently drop a drawing.
+  `profiles.storage_provider` (allowed values: `supabase` | `google_drive` | `dropbox` | null)
+  and can be changed later.
+- Switching providers does not automatically migrate existing drawings; drawings stay where
+  they were saved, and the drawing list shows only the active provider's cloud contents (plus
+  everything in local IndexedDB). Migration-on-switch is a possible future feature.
+
+### Pro unlock via Ko-fi
+
+Support and the paid tier both run through Ko-fi (`https://ko-fi.com/dan1elsan`):
+
+- **Support (donations)** — a "☕ Support on Ko-fi" link in every page footer (`docs/`), a
+  support section on the landing page, and a support link in the web app's Profile panel.
+  Pure tips; no account effect. Mirrored in `.github/FUNDING.yml` (`ko_fi: dan1elsan`) for the
+  GitHub Sponsor button.
+- **Pro upgrade** — a **one-time $5** purchase via a Ko-fi **Shop item** grants lifetime Pro.
+  The "☕ Upgrade to Pro" button in Profile → Cloud Storage links to that Shop item
+  (`KOFI_PRO_URL` in `docs/config.js`). One-time (not recurring), so there is no lapse/renewal
+  to track — Pro stays on once granted.
+- **Automated unlock (Cloudflare Worker)** — Ko-fi's **webhook** POSTs to `POST /kofi/webhook`
+  on the Worker. The Worker: (1) verifies the Ko-fi `verification_token`; (2) reads the payer
+  `email`; (3) finds the Supabase user with that email and sets `profiles.plan = 'pro'`
+  (service-role, bypassing RLS). Implemented in `worker/src/index.js`.
+  - **Email-match caveat**: Ko-fi reports the payer's Ko-fi email; unlock only works if it
+    matches the PandaInk account email. The upgrade UI tells the user to pay with their account
+    email, and the owner keeps a manual reconciliation path for mismatches (a webhook with no
+    matching account returns 200 so Ko-fi does not retry forever).
+- **Interim (before the Worker is deployed)** — the owner manually flips `profiles.plan` to
+  `pro` in Supabase after a Ko-fi payment. Gating, buttons, and the free-tier experience all
+  work regardless; only the automatic unlock waits on the Worker deploy.
+
+### Cloud sync model — auto background + manual
+
+Cloud sync is **automatic in the background**, with a manual "Sync now" control as a backstop:
+
+- **After each device sync**, every newly downloaded drawing is uploaded to the active
+  provider (best-effort; a failure leaves it local-only and pending — see loss protection).
+- **On app load**, pending (not-yet-uploaded) drawings are retried, and **cloud-only drawings
+  are reconciled into the local list** (drawings saved from another device/browser are pulled
+  down so the list is complete across devices).
+- A manual **"Sync now"** button forces the same push-pending + pull-cloud pass on demand.
+- Device → browser sync itself stays **manual** (the user presses Sync) — it needs Web
+  Bluetooth, which only runs in the browser.
+
+### Distinguishing local-only vs cloud-synced drawings
+
+Each drawing tab carries a **cloud badge** so the user can tell at a glance where a drawing
+lives, plus a one-line legend:
+
+- **☁︎✓ synced** — saved locally and confirmed in the active cloud provider.
+- **☁︎↑ pending** — saved locally, not yet uploaded (upload failed or no provider connected);
+  will retry on next sync/load.
+- **☁︎↓ cloud-only** — present in the cloud (e.g. from another device) and not yet cached
+  locally; downloaded on demand when opened.
+
+Badge state derives from the existing IndexedDB record fields (`uploaded`, `driveFileId` /
+provider file id) — see loss protection below.
 
 ### Local storage (IndexedDB) — always on, cloud is optional
 
@@ -269,9 +337,10 @@ device sync → save to IndexedDB (immediately, before anything remote)   ← al
 - Deleting a drawing removes the local copy (and the cloud copy too, if one exists
   and the provider is connected).
 - Status: ✅ Implemented (`docs/storage/idb_store.js` + `app_controller.js`
-  `_cmdSync` / `_loadStoredDrawings` / `_deleteDrawing`). Not yet done: a
-  per-drawing "pending upload" badge in the UI (status text only for now), and
-  cross-device reconciliation of cloud-only drawings back into the local list.
+  `_cmdSync` / `_loadStoredDrawings` / `_deleteDrawing`). Planned on top of it (see the
+  cloud sync + badge rules above): the per-drawing cloud badge (☁︎✓/☁︎↑/☁︎↓ — status text
+  only today), cross-device reconciliation of cloud-only drawings into the local list, and
+  the Supabase / Dropbox providers behind the same local-first flow.
 
 ---
 
@@ -283,64 +352,59 @@ device sync → save to IndexedDB (immediately, before anything remote)   ← al
 - No backend of our own: browser talks directly to Supabase (auth + DB) and Google
   Drive (storage). All logic — BLE protocol, stroke parsing, OAuth, uploads — runs
   in the browser.
-- Consequence of having no backend: the Google Drive `client_secret` ships in the
-  frontend source (documented tradeoff in README.md).
+- Consequence of having no backend: the Google Drive `client_secret` would ship in the
+  frontend source. This is a **temporary** tradeoff — Phase 2 (Cloudflare Worker) moves the
+  secret server-side; it is not the intended end state.
 
-### Phase 2 — Frontend + Python backend (planned)
+### Phase 2 — Frontend + Cloudflare Worker backend (planned)
+
+The backend is a **Cloudflare Worker** (chosen over the earlier Render/Vercel idea — see
+"Why Cloudflare" below). The frontend stays on GitHub Pages; BLE never leaves the browser.
 
 | Layer | Service | Role |
 |---|---|---|
-| Frontend | **Vercel** | web app UI (moves off GitHub Pages); BLE stays here — Web Bluetooth only works in the browser |
-| Backend | **Render** (Python) | server-side logic: OAuth token exchange (secrets stay server-side), cloud-storage uploads, heavy processing (e.g. stroke parsing / SVG generation reusing the existing `src/tuhi/` Python code) |
-| Database | **Supabase** | unchanged: auth, profiles, devices; plus Supabase Storage provider |
+| Frontend | **GitHub Pages** (`docs/`) | web app UI + all Web Bluetooth (connect, register, sync, live capture) — unchanged location |
+| Backend | **Cloudflare Worker** | holds Google + Dropbox OAuth **client secrets**; does token **exchange/refresh**; enforces the Supabase Storage 10-drawing cap; performs account deletion (Supabase service-role); **broadcasts live sessions** to viewers via a Durable Object |
+| Database | **Supabase** | unchanged: auth, profiles (incl. `plan`), devices, `storage_tokens`; plus the Supabase Storage provider |
 
 Division of responsibilities:
 
-- **Browser keeps everything that must touch the device**: Web Bluetooth connect,
-  register, sync, live mode. A backend can never do BLE.
-- **Backend takes everything that needs secrets or trust**: Google OAuth
-  token exchange/refresh (removes the shipped `client_secret` — supersedes part of
-  `.claude/plans/gdrive-secretless-auth.md`), enforcing the Supabase Storage
-  10-drawing cap server-side, any future rate limiting.
-- **Backend may also take shared logic**: the stroke-file parser exists twice today
-  (Python `src/tuhi/protocol.py` + JS `docs/ble/sync.js`) and the JS port has been a
-  bug source — Phase 2 allows the browser to send raw pen data to the backend and
-  reuse the proven Python parser. Open decision: parse in browser (offline-capable)
-  vs backend (single implementation) vs both.
+- **Browser keeps everything that must touch the device**: Web Bluetooth connect, register,
+  sync, and **live pen capture**. A backend can never do BLE — Web Bluetooth is browser-only.
+- **Worker takes everything that needs secrets or trust**: **Google** OAuth token
+  exchange/refresh (holds the `client_secret` — supersedes both the Render plan and the
+  Google-Identity-Services approach in `.claude/plans/gdrive-secretless-auth.md`), account
+  deletion (Supabase service-role), and the **Ko-fi Pro-unlock webhook**. **Dropbox** uses
+  secretless PKCE and stays fully in the browser — no Worker endpoint. Supabase Storage cap
+  enforcement is client-side today (RLS-scoped); authoritative server-side enforcement is a
+  documented follow-up.
+- **Worker owns live-session broadcast**: a **Durable Object** per live session holds the
+  WebSocket connections; the drawing user's browser publishes captured strokes to it and the
+  Worker fans them out to authenticated viewers in real time. (Capture is always browser-side;
+  the Worker only relays — it never talks to the tablet.)
+
+Why Cloudflare (vs the earlier Render/Vercel plan):
+
+- **No spin-down.** Render's free web service sleeps after ~15 min idle and cold-starts in
+  ~30–60 s; since PandaInk usage is "open once, sync, leave", nearly every session would hit a
+  cold backend. Cloudflare Workers have no spin-down and start in ~milliseconds.
+- **Cheaper / simpler free tier**: 100k requests/day, no server to keep warm, deploy with
+  `wrangler` — no separate frontend host (GitHub Pages stays).
+- Workers are **stateless** per request; durable per-session state (live broadcast) lives in
+  **Durable Objects**, and all persistent state lives in **Supabase**.
 
 Constraints / notes:
 
-- Free tiers: Vercel hobby + Render free web service + Supabase free tier.
-- **Render spin-down (free tier) — design constraints.** The service stops after
-  ~15 min without requests and takes ~30-60 s to cold-start on the next one. Since
-  PandaInk usage is "open once, sync, leave", nearly every session hits a cold
-  backend. Rules that follow:
-  - **Keep the backend out of the critical sync path.** BLE sync, stroke parsing
-    (if browser-side), and cloud upload must work without waiting on Render; the
-    backend handles auth/token work only. Then a cold start costs one small delay
-    per session instead of stalling a sync mid-flight.
-  - **Warm it opportunistically**: on app mount, fire a fire-and-forget
-    `GET /health` so the backend wakes while the user logs in and connects BLE —
-    usually awake by the time they hit Sync.
-  - **Expect timeouts in the frontend**: backend calls need generous timeouts and
-    a retry, with an honest "waking up the server (~30 s)…" message — never a
-    generic network error or a spinner that looks hung.
-  - **The backend must be fully stateless**: spin-down wipes RAM (caches, queues,
-    rate-limit counters). All state lives in Supabase.
-  - **No background work on the backend**: a spun-down service can't run retry
-    queues or scheduled jobs — upload retry stays in the frontend (IndexedDB
-    buffer, see Cloud Storage section).
-  - If the backend ever does end up in the critical path: Render's paid starter
-    tier (~$7/month) doesn't spin down. External pingers to keep it warm are
-    fragile and burn free instance-hours — not a long-term plan.
-  - This weighs on the open parse-in-browser-vs-backend decision above: backend
-    parsing puts Render in the critical sync path and inherits all of the above.
-- GitHub Pages (`docs/`) stays as the project/landing/download site; only the app
-  moves to Vercel. Decide whether `app.html` redirects or is removed.
-- The local IndexedDB loss-protection buffer (Cloud Storage section above) remains
-  a frontend responsibility in both phases.
-- Status: 🔵 Planned — no accounts, config, or code yet. Phase 1 bugs (BLE critical
-  fixes) and Cloud Storage tasks come first; see TASKS.md.
+- **Keep the Worker off the critical device-sync path.** BLE sync, stroke parsing, local
+  IndexedDB save, and viewing all work without the Worker; only cloud **token** operations and
+  live broadcast need it. A Worker outage never blocks capturing or locally saving a drawing.
+- The local IndexedDB loss-protection buffer (Cloud Storage section above) remains a frontend
+  responsibility.
+- Status: ✅ Worker code implemented in `worker/` (`wrangler.toml` + `src/index.js`: Google
+  token exchange/refresh, account deletion, Ko-fi webhook, `LiveSession` Durable Object).
+  Pending admin actions: create the Cloudflare account, set secrets, `wrangler deploy`, and
+  paste the Worker URL into `docs/config.js`. Until then the frontend falls back gracefully
+  (Supabase + Dropbox + local work without it). See TASKS.md → admin section.
 
 ---
 
@@ -348,3 +412,31 @@ Constraints / notes:
 
 Add new features here as they are planned, with enough "how it should work" detail
 that behavior questions can be answered from this file.
+
+### Authentication & account lifecycle
+
+Auth runs on **Supabase Auth**, client-side (no custom auth server). Methods, all wired in
+`docs/auth/auth_manager.js`:
+
+- **Email/password** — sign up (with `full_name` metadata + email-confirmation redirect) and
+  sign in. A DB trigger creates the `profiles` row on signup.
+- **Google** and **GitHub** — Supabase social login (`signInWithOAuth`). Each requires the
+  provider enabled in the Supabase dashboard; the GitHub OAuth App is still to be configured.
+- **Password reset** — `resetPasswordForEmail` exists in code; needs a UI entry point
+  ("Forgot password?" on the login form + a recovery handler).
+- **Account deletion** — currently a stub (only signs out). Real deletion needs a privileged
+  call (`auth.admin.deleteUser`) and so must run on the **Cloudflare Worker** with the Supabase
+  service-role key; the frontend calls that Worker endpoint.
+
+The Google **Drive** OAuth in `docs/auth/storage_oauth.js` is separate from Supabase social
+login (it grants Drive `appdata` access, not app login). Its `client_secret` moves to the
+Worker in Phase 2.
+
+### Live-session sharing (planned)
+
+Real-time spectating of a live drawing session. The drawing user's browser captures pen data
+over Web Bluetooth (as live mode does today) and, in addition to rendering it locally,
+publishes each stroke packet to a **Cloudflare Durable Object** (one per session). Other
+**authenticated** users open the same session and subscribe over WebSocket, seeing strokes
+appear in real time. Capture is always browser-side; the Worker/Durable Object only relays —
+it never connects to the tablet. Depends on the Phase 2 Worker.

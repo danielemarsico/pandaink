@@ -6,6 +6,7 @@
 // restores the session automatically via detectSessionInUrl.
 
 import { supabase } from './supabase_client.js';
+import { WORKER_BASE_URL, hasWorker } from '../config.js';
 
 const APP_URL = window.location.origin + window.location.pathname;
 
@@ -62,6 +63,14 @@ export function onAuthStateChange(callback) {
     });
 }
 
+// Fires when the user returns via a password-recovery email link. The app should
+// prompt for a new password (updatePassword) in response.
+export function onPasswordRecovery(callback) {
+    return supabase.auth.onAuthStateChange((event) => {
+        if (event === 'PASSWORD_RECOVERY') callback();
+    });
+}
+
 export async function resetPasswordForEmail(email) {
     return supabase.auth.resetPasswordForEmail(email, { redirectTo: APP_URL });
 }
@@ -91,12 +100,27 @@ export async function updateProfile(userId, updates) {
     return { data, error };
 }
 
-export async function deleteAccount(userId) {
+export async function deleteAccount() {
     // Deleting auth.users cascades to profiles / devices / storage_tokens via FK.
-    // Supabase client-side cannot delete auth users directly; use a server-side
-    // function or the Supabase admin API. For now, sign out and show a message.
-    await signOut();
-    return { error: null };
+    // The client cannot delete auth users directly — the Cloudflare Worker does it
+    // with the service-role key, authenticated by the caller's access token.
+    if (!hasWorker()) {
+        return { error: new Error('Account deletion needs the backend, which is not configured yet. Please contact support.') };
+    }
+    const session = await getSession();
+    if (!session) return { error: new Error('Not signed in.') };
+
+    try {
+        const res = await fetch(`${WORKER_BASE_URL}/account/delete`, {
+            method:  'POST',
+            headers: { Authorization: 'Bearer ' + session.access_token },
+        });
+        if (!res.ok) return { error: new Error('Account deletion failed: ' + await res.text()) };
+        await signOut();
+        return { error: null };
+    } catch (e) {
+        return { error: e };
+    }
 }
 
 // ── Device config ─────────────────────────────────────────────────────────────

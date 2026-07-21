@@ -5,25 +5,27 @@ import { BleManager }     from '../ble/ble_manager.js';
 import { registerDevice }  from '../ble/register.js';
 import { syncDrawings }    from '../ble/sync.js';
 import { startLive }       from '../ble/live.js';
+import { publishLiveSession, subscribeLiveSession, newSessionId } from '../ble/live_share.js';
+import { hasWorker }       from '../config.js';
 import { DrawingCanvas }   from './drawing_canvas.js';
 import { LiveCanvas }      from './live_canvas.js';
 import { drawingToSvg, downloadSvg } from '../export/svg_export.js';
 import { ProfilePanel }    from './profile_panel.js';
 
 import {
-    getUser, onAuthStateChange,
+    getUser, onAuthStateChange, onPasswordRecovery,
     signUpWithEmail, signInWithEmail, signInWithGoogle, signInWithGitHub,
+    resetPasswordForEmail, updatePassword,
     signOut, loadDevice, saveDevice, deleteDevice,
 } from '../auth/auth_manager.js';
 
-import {
-    handleGDriveCallback, isDriveConnected,
-} from '../auth/storage_oauth.js';
+import { handleGDriveCallback }   from '../auth/storage_oauth.js';
+import { handleDropboxCallback }  from '../auth/dropbox_oauth.js';
 
 // Local IndexedDB store — always available, the source of truth for the UI.
 import * as localStore from '../storage/idb_store.js';
-// Google Drive store — optional cloud provider, used only when connected.
-import * as driveStore  from '../storage/gdrive_store.js';
+// Cloud abstraction — the active tier-gated provider (Supabase / Drive / Dropbox).
+import * as cloudStore  from '../storage/cloud_store.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AppController
@@ -37,7 +39,10 @@ export class AppController {
         this._mode        = 'normal';
         this._orientation = 'portrait';
         this._liveSession = null;
+        this._liveShare   = null;   // active publisher, when sharing is on
+        this._viewer      = null;   // active viewer subscription, when watching
         this._drawings    = [];
+        this._cloudOn     = false;   // active provider connected? (for tab badges)
         this._activeDrawingIndex = -1;
         this._liveCanvas  = null;
         this._profilePanel = null;
@@ -50,15 +55,9 @@ export class AppController {
     async mount(rootEl) {
         this._root = rootEl;
 
-        // Handle Google Drive OAuth callback before rendering anything
-        try {
-            const wasDriveCallback = await handleGDriveCallback();
-            if (wasDriveCallback) {
-                // URL has been cleaned; fall through to normal render
-            }
-        } catch (e) {
-            console.error('Drive callback error:', e);
-        }
+        // Handle cloud OAuth callbacks (Google Drive / Dropbox) before rendering.
+        try { await handleGDriveCallback(); }   catch (e) { console.error('Drive callback error:', e); }
+        try { await handleDropboxCallback(); }  catch (e) { console.error('Dropbox callback error:', e); }
 
         // Check current auth state
         this._user = await getUser();
@@ -66,8 +65,12 @@ export class AppController {
         // Subscribe to future auth changes (login / logout in another tab, etc.)
         onAuthStateChange((user) => {
             this._user = user;
+            cloudStore.clearProfileCache();
             this._renderRoot();
         });
+
+        // Show a set-new-password panel when the user returns via a reset email.
+        onPasswordRecovery(() => this._showRecoveryPanel());
 
         await this._renderRoot();
     }
@@ -108,6 +111,7 @@ export class AppController {
       </button>
     </div>
     <p class="auth-switch">No account? <a id="auth-to-register">Register</a></p>
+    <p class="auth-switch"><a id="auth-forgot">Forgot password?</a></p>
   </div>
 
   <div id="auth-form-register" style="display:none">
@@ -142,6 +146,13 @@ export class AppController {
             msg('', false);
         });
 
+        overlay.querySelector('#auth-forgot').addEventListener('click', async () => {
+            const email = overlay.querySelector('#auth-email').value.trim();
+            if (!email) { msg('Enter your email above first, then click "Forgot password?".', true); return; }
+            const { error } = await resetPasswordForEmail(email);
+            msg(error ? error.message : 'Password reset email sent — check your inbox.', !!error);
+        });
+
         overlay.querySelector('#auth-btn-signin').addEventListener('click', async () => {
             const email = overlay.querySelector('#auth-email').value.trim();
             const pw    = overlay.querySelector('#auth-password').value;
@@ -174,6 +185,37 @@ export class AppController {
         return overlay;
     }
 
+    // Shown when the user follows a password-reset email link (recovery session).
+    _showRecoveryPanel() {
+        const overlay = document.createElement('div');
+        overlay.className = 'auth-overlay';
+        overlay.innerHTML = `
+<div class="auth-card">
+  <h2>Set a new password</h2>
+  <div id="rec-msg" class="auth-msg"></div>
+  <input id="rec-password" type="password" placeholder="New password (min 8 chars)" autocomplete="new-password">
+  <button id="rec-save" class="auth-btn-primary" style="margin-top:0.75rem">Update password</button>
+</div>`;
+        this._root.innerHTML = '';
+        this._root.appendChild(overlay);
+
+        const msg = (t, err) => {
+            const el = overlay.querySelector('#rec-msg');
+            el.textContent = t;
+            el.className = 'auth-msg ' + (err ? 'auth-msg-error' : 'auth-msg-ok');
+            el.style.display = t ? 'block' : 'none';
+        };
+        overlay.querySelector('#rec-save').addEventListener('click', async () => {
+            const pw = overlay.querySelector('#rec-password').value;
+            if (!pw || pw.length < 8) { msg('Password must be at least 8 characters.', true); return; }
+            const { error } = await updatePassword(pw);
+            if (error) { msg(error.message, true); return; }
+            msg('Password updated. Loading your app…', false);
+            this._user = await getUser();
+            await this._renderRoot();
+        });
+    }
+
     // ── App shell ────────────────────────────────────────────────────────────
 
     async _mountApp() {
@@ -199,6 +241,27 @@ export class AppController {
             this._root.querySelector('#btn-forget').style.display = '';
             await this._loadStoredDrawings();
         }
+
+        // If opened via a share link (?watch=<id>), join as a viewer.
+        await this._maybeStartViewer();
+    }
+
+    async _maybeStartViewer() {
+        const sessionId = new URLSearchParams(window.location.search).get('watch');
+        if (!sessionId) return;
+        this._setMode('live');
+        const liveRadio = this._root.querySelector('input[name="mode"][value="live"]');
+        if (liveRadio) liveRadio.checked = true;
+        this._root.querySelector('#btn-start-live').style.display = 'none';
+        this._root.querySelector('#live-status').textContent = 'Connecting to live session…';
+        try {
+            this._liveCanvas.clear();
+            this._viewer = await subscribeLiveSession(sessionId, (x, y, p, inProx) =>
+                this._liveCanvas.onPenPoint(x, y, p, inProx));
+            this._root.querySelector('#live-status').textContent = 'Watching a live session';
+        } catch (e) {
+            this._root.querySelector('#live-status').textContent = 'Could not join session: ' + e.message;
+        }
     }
 
     _buildAppHTML() {
@@ -222,6 +285,7 @@ export class AppController {
   <div class="action-bar">
     <button id="btn-connect">Connect / Register</button>
     <button id="btn-sync" disabled>Sync drawings</button>
+    <button id="btn-cloud-sync" style="display:none">Sync now (cloud)</button>
     <button id="btn-forget" style="display:none">Forget device</button>
   </div>
   <div id="status-bar" class="status-bar">Not connected</div>
@@ -236,7 +300,11 @@ export class AppController {
 <div id="live-panel" class="panel" style="display:none">
   <div class="action-bar">
     <button id="btn-start-live" disabled>Start Live</button>
+    <label id="live-share-wrap" class="live-share-toggle" style="display:none">
+      <input type="checkbox" id="live-share"> Share this session
+    </label>
   </div>
+  <div id="live-share-link" class="live-share-link" style="display:none"></div>
   <div id="live-status" class="status-bar">Idle</div>
   <canvas id="live-canvas" class="live-canvas"></canvas>
 </div>`;
@@ -264,6 +332,7 @@ export class AppController {
 
         r('#btn-connect').addEventListener('click', () => this._cmdConnect());
         r('#btn-sync').addEventListener('click',    () => this._cmdSync());
+        r('#btn-cloud-sync').addEventListener('click', () => this._cmdCloudSync());
         r('#btn-forget').addEventListener('click',  () => this._cmdForget());
         r('#btn-start-live').addEventListener('click', () => this._cmdToggleLive());
 
@@ -276,6 +345,9 @@ export class AppController {
 
         const liveEl = r('#live-canvas');
         this._liveCanvas = new LiveCanvas(liveEl, { orientation: this._orientation });
+
+        // Live sharing is only offered when a backend (Worker) is configured.
+        if (hasWorker()) r('#live-share-wrap').style.display = '';
     }
 
     // ── Mode / orientation ───────────────────────────────────────────────────
@@ -406,10 +478,12 @@ export class AppController {
         try {
             await this._ensureBleConnected();
 
-            const driveOn = await this._isDriveOn();
+            const cloudOn      = await this._isCloudOn();
+            const providerName = cloudOn ? await cloudStore.activeProviderName(this._user.id) : null;
             let saved = 0;
             let uploaded = 0;
             let pending  = 0;
+            let capHit   = false;
 
             // Persist each drawing the instant it's parsed — inside the sync loop,
             // BEFORE the device is told to delete it. The device only exposes the
@@ -434,15 +508,16 @@ export class AppController {
                     saved++;
                     this._setStatus(`Saved ${saved} drawing(s)…`);
 
-                    if (driveOn) {
+                    if (cloudOn) {
                         try {
-                            const up = await driveStore.saveDrawing(record);
+                            const up = await cloudStore.saveDrawing(this._user.id, record);
                             await localStore.updateDrawing({
                                 ...record, id, uploaded: true, driveFileId: up.driveFileId,
                             });
                             uploaded++;
                         } catch (e) {
                             // Local copy is safe; leave it pending for a later retry.
+                            if (e.code === 'CAP_REACHED') capHit = true;
                             console.warn('Cloud upload failed, kept locally:', e);
                             pending++;
                         }
@@ -451,9 +526,10 @@ export class AppController {
             });
 
             let status = `Synced ${drawings.length} drawing(s) — saved locally`;
-            if (driveOn) {
-                status += `; ${uploaded} uploaded to Drive`;
-                if (pending) status += `, ${pending} pending (upload failed, kept locally)`;
+            if (cloudOn) {
+                status += `; ${uploaded} uploaded to ${providerName}`;
+                if (pending) status += `, ${pending} pending (kept locally)`;
+                if (capHit) status += ' — free-plan limit reached; delete old drawings or upgrade to Pro';
             }
             this._setStatus(status);
             await this._loadStoredDrawings();
@@ -481,16 +557,25 @@ export class AppController {
             this._drawings = await localStore.getDrawingsByDevice(this._deviceInfo.id);
             this._renderDrawingList();
 
+            const cloudOn = await this._isCloudOn();
+            this._cloudOn = cloudOn;
+            this._renderDrawingList();
+            const cloudBtn = this._root.querySelector('#btn-cloud-sync');
+            if (cloudBtn) cloudBtn.style.display = cloudOn ? '' : 'none';
+
+            // With a provider connected: pull cloud-only drawings into the local
+            // list (cross-device), then retry any local pending uploads.
+            if (cloudOn) {
+                await this._reconcileCloud();
+                await this._retryPendingUploads();
+            }
+
             const total = this._drawings.length;
             if (total === 0) { this._setStatus('No drawings yet.'); return; }
 
-            // Only frame drawings as "pending cloud upload" when a cloud provider
-            // is actually connected — with no cloud, local IS the storage, not a
-            // waiting room. Retry any pending uploads in the background.
             const pending = this._drawings.filter((d) => !d.uploaded).length;
-            if (pending && await this._isDriveOn()) {
+            if (pending && cloudOn) {
                 this._setStatus(`${total} drawing(s) loaded (${pending} not yet in cloud).`);
-                this._retryPendingUploads();
             } else {
                 this._setStatus(`${total} drawing(s) loaded.`);
             }
@@ -499,28 +584,74 @@ export class AppController {
         }
     }
 
-    // Upload any locally-saved drawings that never made it to the cloud. Runs
-    // only when Drive is connected; failures are logged and left pending.
+    // Manual "Sync now": force a cloud pull + pending push, then reload.
+    async _cmdCloudSync() {
+        if (!this._deviceInfo) return;
+        if (!await this._isCloudOn()) { this._setStatus('No cloud provider connected.'); return; }
+        const btn = this._root.querySelector('#btn-cloud-sync');
+        btn.disabled = true;
+        this._setStatus('Syncing with cloud…');
+        try {
+            await this._loadStoredDrawings();
+            this._setStatus('Cloud sync complete.');
+        } catch (e) {
+            this._setStatus('Cloud sync failed: ' + e.message);
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
+    // Download cloud drawings with no local copy (synced from another device) and
+    // cache them in IndexedDB as already-uploaded. Local stays the render source.
+    async _reconcileCloud() {
+        try {
+            const cloud = await cloudStore.getDrawingsByDevice(this._user.id, this._deviceInfo.id);
+            const known = new Set(this._drawings.map((d) => d.timestamp));
+            let added = 0;
+            for (const c of cloud) {
+                if (known.has(c.timestamp)) continue;
+                await localStore.saveDrawing({
+                    deviceId:    this._deviceInfo.id,
+                    timestamp:   c.timestamp,
+                    dimensions:  c.dimensions,
+                    strokes:     c.strokes,
+                    uploaded:    true,
+                    driveFileId: c.driveFileId ?? null,
+                });
+                added++;
+            }
+            if (added) {
+                this._drawings = await localStore.getDrawingsByDevice(this._deviceInfo.id);
+                this._renderDrawingList();
+            }
+        } catch (e) {
+            console.warn('Cloud reconciliation failed:', e);
+        }
+    }
+
+    // Upload any locally-saved drawings that never made it to the cloud. Runs only
+    // when a provider is connected; failures are logged and left pending. A free-tier
+    // cap error stops the loop (further uploads would fail the same way).
     async _retryPendingUploads() {
         for (const d of this._drawings) {
             if (d.uploaded) continue;
             try {
-                const saved = await driveStore.saveDrawing(d);
+                const saved = await cloudStore.saveDrawing(this._user.id, d);
                 await localStore.updateDrawing({ ...d, uploaded: true, driveFileId: saved.driveFileId });
                 d.uploaded    = true;
                 d.driveFileId = saved.driveFileId;
             } catch (e) {
                 console.warn('Pending upload retry failed:', e);
+                if (e.code === 'CAP_REACHED') break;
             }
         }
     }
 
-    // Whether a cloud provider (Google Drive) is currently connected. Any error
-    // (offline, no Supabase session) is treated as "not connected" so the local
-    // flow keeps working.
-    async _isDriveOn() {
+    // Whether the active cloud provider is connected. Any error (offline, no
+    // session, provider gated) is treated as "not connected" so local keeps working.
+    async _isCloudOn() {
         try {
-            return await isDriveConnected();
+            return await cloudStore.isCloudConnected(this._user.id);
         } catch {
             return false;
         }
@@ -546,6 +677,12 @@ export class AppController {
 
             // Selecting and closing are separate targets: a single button whose
             // whole label ended with "×" made every tap close the tab.
+            const badge = document.createElement('span');
+            const b = this._badgeFor(d);
+            badge.className   = 'tab-badge ' + b.cls;
+            badge.textContent = b.icon;
+            badge.title       = b.title;
+
             const label = document.createElement('span');
             label.className   = 'tab-label';
             label.textContent = ts;
@@ -560,12 +697,20 @@ export class AppController {
                 this._closeTab(idx);
             });
 
+            tab.appendChild(badge);
             tab.appendChild(label);
             tab.appendChild(close);
             tabList.appendChild(tab);
         });
 
         this._selectTab(0);
+    }
+
+    // Cloud sync badge for a drawing tab.
+    _badgeFor(d) {
+        if (d.uploaded)     return { icon: '☁✓', cls: 'badge-synced',  title: 'Synced to cloud' };
+        if (this._cloudOn)  return { icon: '☁↑', cls: 'badge-pending', title: 'Pending upload to cloud' };
+        return                     { icon: '●',  cls: 'badge-local',   title: 'Saved on this device only' };
     }
 
     _selectTab(idx) {
@@ -616,10 +761,10 @@ export class AppController {
         const drawing = this._drawings[idx];
         try {
             if (drawing.id != null) await localStore.deleteDrawing(drawing.id);
-            // Also remove the cloud copy if there is one and Drive is connected.
-            if (drawing.driveFileId && await this._isDriveOn()) {
+            // Also remove the cloud copy if there is one and a provider is connected.
+            if (drawing.driveFileId && await this._isCloudOn()) {
                 try {
-                    await driveStore.deleteDrawing(drawing.driveFileId);
+                    await cloudStore.deleteDrawing(this._user.id, drawing.driveFileId);
                 } catch (e) {
                     console.warn('Cloud delete failed (local copy removed):', e);
                 }
@@ -653,14 +798,32 @@ export class AppController {
             await this._ensureBleConnected();
 
             this._liveCanvas.clear();
+
+            // Optionally publish this session to viewers via the Worker.
+            const shareOn = hasWorker() && this._root.querySelector('#live-share')?.checked;
+            if (shareOn) {
+                const sessionId = newSessionId();
+                try {
+                    this._liveShare = await publishLiveSession(sessionId);
+                    this._showShareLink(sessionId);
+                } catch (e) {
+                    this._liveShare = null;
+                    this._showShareError(e.message);
+                }
+            }
+
             this._liveSession = await startLive(
                 this._ble,
                 this._deviceInfo,
-                (x, y, p, inProx) => this._liveCanvas.onPenPoint(x, y, p, inProx),
+                (x, y, p, inProx) => {
+                    this._liveCanvas.onPenPoint(x, y, p, inProx);
+                    if (this._liveShare) this._liveShare.send(x, y, p, inProx);
+                },
             );
             btn.textContent = 'Stop Live';
             btn.disabled    = false;
-            this._root.querySelector('#live-status').textContent = 'Live mode active';
+            this._root.querySelector('#live-status').textContent =
+                this._liveShare ? 'Live mode active — sharing' : 'Live mode active';
         } catch (err) {
             this._root.querySelector('#live-status').textContent = 'Error: ' + err.message;
             btn.disabled = false;
@@ -672,9 +835,29 @@ export class AppController {
         if (!this._liveSession) return;
         await this._liveSession.stop().catch(() => {});
         this._liveSession = null;
+        if (this._liveShare) { this._liveShare.close(); this._liveShare = null; }
+        const link = this._root.querySelector('#live-share-link');
+        if (link) link.style.display = 'none';
         const btn = this._root.querySelector('#btn-start-live');
         btn.textContent = 'Start Live';
         this._root.querySelector('#live-status').textContent = 'Idle';
+    }
+
+    _showShareLink(sessionId) {
+        const el = this._root.querySelector('#live-share-link');
+        if (!el) return;
+        const url = `${window.location.origin}${window.location.pathname}?watch=${encodeURIComponent(sessionId)}`;
+        el.innerHTML = `Share this link (viewers must be signed in): <input class="live-share-url" readonly value="${url}">`;
+        el.style.display = '';
+        const input = el.querySelector('.live-share-url');
+        input.addEventListener('click', () => { input.select(); });
+    }
+
+    _showShareError(message) {
+        const el = this._root.querySelector('#live-share-link');
+        if (!el) return;
+        el.textContent = 'Could not start sharing: ' + message;
+        el.style.display = '';
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
