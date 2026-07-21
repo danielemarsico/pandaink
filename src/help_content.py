@@ -22,9 +22,14 @@ Getting Started with PandaInk
    - Click [Fetch] at any time to reload all drawings stored on disk.
    - Useful after restarting the app or when drawings were synced on another run.
 
-5. Export as SVG
-   - Inside any drawing tab, click [Save SVG] to export the drawing.
+5. Export a drawing (SVG / PNG / PDF)
+   - Inside any drawing tab, click [Export ▾] and choose a format:
+     - Save as SVG… — scalable vector file (best for editing / print).
+     - Save as PNG… — raster image with a transparent background.
+     - Save as PDF… — single-page document on a white background.
    - A save dialog lets you choose the destination and filename.
+   - Cloud upload (Google Drive / Dropbox / OneDrive), when configured,
+     uploads the drawing as SVG.
 
 6. Delete a drawing
    - Inside a drawing tab, click [Delete] to permanently remove the file from disk.

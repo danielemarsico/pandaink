@@ -259,7 +259,7 @@ python src/tuhi_gui.py
 1. **Register** — click Register to search for and pair your device over BLE.
 2. **Listen** — click Listen to sync offline drawings from the device to your PC.
 3. **Fetch** — reload drawings from disk (also runs automatically at startup).
-4. **Save SVG** — export any drawing as an SVG file.
+4. **Export** — save any drawing as an SVG, PNG, or PDF file (via the tab's Export ▾ menu).
 5. **Live mode** — stream pen strokes to screen in real time while you draw.
 
 ### CLI
