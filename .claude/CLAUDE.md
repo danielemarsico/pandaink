@@ -187,7 +187,7 @@ Browser
   │
   ├── docs/storage/
   │   ├── gdrive_store.js                 — Google Drive REST API v3 (appDataFolder); wired into app_controller.js
-  │   └── idb_store.js                    — IndexedDB CRUD (unused/legacy — pre-Drive local-storage design, not imported anywhere)
+  │   └── idb_store.js                    — IndexedDB CRUD — the always-on LOCAL SOURCE OF TRUTH; imported by app_controller.js (cloud is layered on top)
   │
   └── docs/export/
       └── svg_export.js                   — SVG string generation + Blob download
