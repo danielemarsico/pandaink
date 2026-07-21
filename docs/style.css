@@ -124,6 +124,28 @@ nav .container {
   text-decoration: none;
 }
 
+/* ── Ko-fi support ── */
+.btn-kofi {
+  background: #ff5e5b;
+  color: #fff;
+  border-color: #ff5e5b;
+}
+
+.btn-kofi:hover {
+  background: #e94b48;
+  border-color: #e94b48;
+  text-decoration: none;
+}
+
+.kofi-link {
+  color: #ff5e5b;
+  font-weight: 600;
+}
+
+.kofi-link:hover {
+  color: #e94b48;
+}
+
 .btn-group {
   display: flex;
   flex-wrap: wrap;

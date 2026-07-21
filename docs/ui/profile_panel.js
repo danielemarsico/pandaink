@@ -120,6 +120,14 @@ export class ProfilePanel {
     <div id="pp-trace-msg" class="pp-msg" style="display:none"></div>
   </section>
 
+  <section class="pp-section">
+    <h3 class="pp-section-title">Support PandaInk</h3>
+    <p class="pp-muted pp-hint">PandaInk is free and open source. A coffee helps fund the
+       cloud-sync hosting and keeps development going.</p>
+    <a class="btn-kofi btn-small" href="https://ko-fi.com/dan1elsan" target="_blank" rel="noopener"
+       style="display:inline-block;text-decoration:none;">☕ Buy me a coffee</a>
+  </section>
+
   <section class="pp-section pp-danger-zone">
     <button id="pp-signout" class="btn-danger-outline">Sign out</button>
   </section>

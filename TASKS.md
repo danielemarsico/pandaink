@@ -9,7 +9,9 @@ All completed tasks have been removed. See `PROGRESS.md` for history.
 ### Manual / User Steps
 
 - [ ] **Screenshots** — Replace grey placeholder boxes in `docs/features.html` with real screenshots once app is stable
-- [ ] **Ko-fi** — Create account at ko-fi.com with username `danielemarsico` (GitHub Sponsor button links to it automatically via `FUNDING.yml`)
+- [x] **Ko-fi** — Account created (`https://ko-fi.com/dan1elsan`); wired into `FUNDING.yml`,
+      all page footers, the landing-page support section, and the web-app Profile panel.
+      Still to set up a **Pro membership/shop tier** on Ko-fi for the paid unlock (see W-BE6)
 - [ ] **GitHub Sponsors** — Enrol at github.com/sponsors; once approved, uncomment `github: danielemarsico` in `.github/FUNDING.yml`
 - [ ] **Lightning donations** — Create a Lightning Address (e.g. via Wallet of Satoshi or Alby) and add donate links to `docs/index.html` and `docs/download.html`
 
@@ -148,7 +150,8 @@ entitlement flag now; real payments are deferred.
         (values `free` | `pro`); document `storage_provider` allowed values as
         `supabase` | `google_drive` | `dropbox` | null
   - [ ] Read `plan` on mount; expose it to the provider picker (gates paid providers)
-  - [ ] (Deferred, separate task) wire a payment provider (Stripe/Ko-fi) to set `plan`
+  - [ ] Payments run through **Ko-fi** (`https://ko-fi.com/dan1elsan`); automated unlock is
+        the Worker webhook (W-BE6). Interim: owner flips `plan` to `pro` in Supabase manually
 
 - [ ] **S2 — Supabase Storage provider (free tier, 10-drawing cap)**
   - [ ] Migration `004_storage.sql`: private bucket `drawings`, path
@@ -171,6 +174,8 @@ entitlement flag now; real payments are deferred.
   - [ ] Profile → Cloud Storage: pick Supabase / Google Drive / Dropbox; persist to
         `profiles.storage_provider`. Paid providers are shown but **locked** for
         `plan = 'free'` (with an upgrade hint)
+  - [ ] "Upgrade to Pro" button → Ko-fi membership/shop (`https://ko-fi.com/dan1elsan`), with
+        copy telling the user to pay with their account email so the unlock (W-BE6) matches
   - [ ] Route all storage calls in `app_controller.js` through the active provider
         (single storage interface chosen at mount + on change)
   - [ ] Supabase Storage needs no OAuth (session token suffices) — Drive/Dropbox keep
@@ -221,6 +226,11 @@ Replaces the earlier Render plan. Frontend stays on GitHub Pages; BLE stays in t
 - [ ] **W-BE5 — Live-session broadcast (Durable Object)** — one DO per session; the drawing
       user's browser publishes captured strokes, authenticated viewers subscribe over
       WebSocket. Depends on live capture staying browser-side
+- [ ] **W-BE6 — Ko-fi webhook → Pro unlock** — endpoint that verifies the Ko-fi
+      `verification_token`, reads payer `email` + tier / `is_subscription_payment`, matches the
+      Supabase user by email, and sets `profiles.plan = 'pro'` (service-role). Store
+      subscription state so a lapsed membership reverts to `free`; keep a manual reconciliation
+      path for email mismatches (RULEBOOK.md → "Pro unlock via Ko-fi")
 - [ ] Keep the Worker **off the critical device-sync path** — sync + local save must work if
       the Worker is unreachable (RULEBOOK.md constraint)
 

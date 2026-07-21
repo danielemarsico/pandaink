@@ -231,9 +231,8 @@ always on underneath — see below).
 - Each user has a plan stored in `profiles.plan` = `free` | `pro` (default `free`).
 - **Free** users may only select **Supabase Storage** (10-drawing cap).
 - **Pro** users may select **Supabase Storage, Google Drive, or Dropbox**.
-- Gating is an **entitlement flag** for now — flipping `profiles.plan` to `pro` unlocks the
-  paid providers. Wiring an actual payment provider (Stripe / Ko-fi) to set that flag is a
-  separate, deferred task and is **not** part of the current work.
+- Gating is an **entitlement flag** — `profiles.plan = 'pro'` unlocks the paid providers.
+  Payments run through **Ko-fi** (`https://ko-fi.com/dan1elsan`); see "Pro unlock via Ko-fi".
 - The Supabase Storage **10-drawing cap** is enforced when saving: at the cap, saving a new
   drawing must fail with a clear message telling the user to delete old drawings (or upgrade
   to a paid provider) — it must **never silently drop a drawing**.
@@ -248,6 +247,29 @@ always on underneath — see below).
 - Switching providers does not automatically migrate existing drawings; drawings stay where
   they were saved, and the drawing list shows only the active provider's cloud contents (plus
   everything in local IndexedDB). Migration-on-switch is a possible future feature.
+
+### Pro unlock via Ko-fi
+
+Support and the paid tier both run through Ko-fi (`https://ko-fi.com/dan1elsan`):
+
+- **Support (donations)** — a "☕ Support on Ko-fi" link in every page footer (`docs/`), a
+  support section on the landing page, and a support link in the web app's Profile panel.
+  Pure tips; no account effect. Mirrored in `.github/FUNDING.yml` (`ko_fi: dan1elsan`) for the
+  GitHub Sponsor button.
+- **Pro upgrade** — the user buys a Ko-fi **Membership** tier (recurring) or **Shop** item
+  (one-time) named for the Pro plan. An "Upgrade to Pro" button in Profile → Cloud Storage
+  links there (built with the tier-gating UI, task S3).
+- **Automated unlock (needs the Cloudflare Worker)** — configure Ko-fi's **webhook** to POST
+  to a Worker endpoint. On each payment the Worker: (1) verifies the Ko-fi
+  `verification_token`; (2) reads the payer `email` + tier/`is_subscription_payment`; (3) finds
+  the Supabase user with that email and sets `profiles.plan = 'pro'` (service-role). For
+  recurring memberships, store the subscription state so a lapse can revert to `free`.
+  - **Email-match caveat**: Ko-fi reports the payer's Ko-fi email; unlock only works if it
+    matches the PandaInk account email. The upgrade UI must tell the user to pay with their
+    account email, and the owner keeps a manual reconciliation path for mismatches.
+- **Interim (before the Worker exists)** — no webhook yet, so the owner manually flips
+  `profiles.plan` to `pro` in Supabase after seeing a Ko-fi payment. The gating, buttons, and
+  free-tier experience still work; only the unlock step is manual until the Worker ships.
 
 ### Cloud sync model — auto background + manual
 
