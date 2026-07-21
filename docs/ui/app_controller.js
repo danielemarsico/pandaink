@@ -9,7 +9,7 @@ import { publishLiveSession, subscribeLiveSession, newSessionId } from '../ble/l
 import { hasWorker }       from '../config.js';
 import { DrawingCanvas }   from './drawing_canvas.js';
 import { LiveCanvas }      from './live_canvas.js';
-import { drawingToSvg, downloadSvg } from '../export/svg_export.js';
+import { drawingToSvg, downloadSvg, drawingToPngBlob, drawingToPdfBlob, downloadBlob } from '../export/svg_export.js';
 import { ProfilePanel }    from './profile_panel.js';
 
 import {
@@ -766,19 +766,50 @@ export class AppController {
         const toolbar = document.createElement('div');
         toolbar.className = 'tab-toolbar';
 
-        const saveBtn = document.createElement('button');
-        saveBtn.textContent = 'Save SVG';
-        saveBtn.addEventListener('click', () => {
-            const ts  = new Date(drawing.timestamp * 1000).toLocaleString().replace(/[/:]/g, '-');
-            const svg = drawingToSvg(drawing, this._orientation);
-            downloadSvg(svg, `drawing_${ts}.svg`);
+        const baseName = () =>
+            `drawing_${new Date(drawing.timestamp * 1000).toLocaleString().replace(/[/:]/g, '-')}`;
+
+        const svgBtn = document.createElement('button');
+        svgBtn.textContent = 'Save SVG';
+        svgBtn.addEventListener('click', () => {
+            downloadSvg(drawingToSvg(drawing, this._orientation), `${baseName()}.svg`);
+        });
+
+        const pngBtn = document.createElement('button');
+        pngBtn.textContent = 'Save PNG';
+        pngBtn.addEventListener('click', async () => {
+            pngBtn.disabled = true;
+            try {
+                const blob = await drawingToPngBlob(drawing, this._orientation);
+                downloadBlob(blob, `${baseName()}.png`);
+            } catch (e) {
+                alert('PNG export failed: ' + (e && e.message ? e.message : e));
+            } finally {
+                pngBtn.disabled = false;
+            }
+        });
+
+        const pdfBtn = document.createElement('button');
+        pdfBtn.textContent = 'Save PDF';
+        pdfBtn.addEventListener('click', async () => {
+            pdfBtn.disabled = true;
+            try {
+                const blob = await drawingToPdfBlob(drawing, this._orientation);
+                downloadBlob(blob, `${baseName()}.pdf`);
+            } catch (e) {
+                alert('PDF export failed: ' + (e && e.message ? e.message : e));
+            } finally {
+                pdfBtn.disabled = false;
+            }
         });
 
         const delBtn = document.createElement('button');
         delBtn.textContent = 'Delete';
         delBtn.addEventListener('click', () => this._deleteDrawing(idx));
 
-        toolbar.appendChild(saveBtn);
+        toolbar.appendChild(svgBtn);
+        toolbar.appendChild(pngBtn);
+        toolbar.appendChild(pdfBtn);
         toolbar.appendChild(delBtn);
         content.appendChild(toolbar);
 

@@ -99,26 +99,31 @@ class JsonSvg(ImageExportBase):
         svg.save()
 
 
-class JsonPng(ImageExportBase):
-    """PNG export using Pillow instead of pycairo."""
+class _RasterExportBase(ImageExportBase):
+    """Shared raster rendering (Pillow) for PNG and PDF export."""
 
     _output_scaling_factor = 100
     _base_pen_width = 3
     _pen_pressure_width_factor = 1
 
-    def _convert(self):
+    def _render_image(self, background):
+        """Draw all strokes onto a new PIL image and return it.
+
+        ``background`` is an RGBA colour tuple used to fill the canvas
+        (use a fully transparent value for PNG, opaque white for PDF).
+        """
         try:
             from PIL import Image, ImageDraw
         except ImportError:
             raise ImportError(
-                'Pillow is required for PNG export on Windows. '
+                'Pillow is required for PNG/PDF export on Windows. '
                 'Install with: pip install Pillow'
             )
 
         width, height = self.output_dimensions
-        width, height = int(width), int(height)
+        width, height = max(1, int(width)), max(1, int(height))
 
-        image = Image.new('RGBA', (width, height), (0, 0, 0, 0))
+        image = Image.new('RGBA', (width, height), background)
         draw = ImageDraw.Draw(image)
 
         for sk_num, stroke_points in enumerate(self.output_strokes):
@@ -129,4 +134,22 @@ class JsonPng(ImageExportBase):
                 draw.line([(x1, y1), (x2, y2)], fill='black',
                           width=max(1, int(avg_width)))
 
+        return image
+
+
+class JsonPng(_RasterExportBase):
+    """PNG export using Pillow instead of pycairo (transparent background)."""
+
+    def _convert(self):
+        image = self._render_image((0, 0, 0, 0))
         image.save(self.filename)
+
+
+class JsonPdf(_RasterExportBase):
+    """PDF export using Pillow — a single raster page on a white background."""
+
+    def _convert(self):
+        image = self._render_image((255, 255, 255, 255))
+        # PDF has no alpha channel; flatten onto the white background.
+        image = image.convert('RGB')
+        image.save(self.filename, 'PDF', resolution=100.0)

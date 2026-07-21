@@ -45,7 +45,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from tuhi.app import TuhiApp
 from tuhi.config_win import TuhiConfig, get_default_data_dir
-from tuhi.export_win import JsonSvg
+from tuhi.export_win import JsonSvg, JsonPng, JsonPdf
 from help_dialog import HelpDialog
 
 try:
@@ -614,12 +614,20 @@ class TuhiGUIApp(tk.Tk):
         safe_ts = ts.replace(' ', '_').replace(':', '-')
         default_svg_name = f'drawing_{safe_ts}.svg'
 
-        def _get_svg_bytes():
+        # fmt → (exporter class, extension, filetype label)
+        _EXPORTERS = {
+            'SVG': (JsonSvg, '.svg', 'SVG files'),
+            'PNG': (JsonPng, '.png', 'PNG images'),
+            'PDF': (JsonPdf, '.pdf', 'PDF documents'),
+        }
+
+        def _get_export_bytes(fmt='SVG'):
             import json as _json, tempfile
-            with tempfile.NamedTemporaryFile(suffix='.svg', delete=False) as f:
+            exporter, ext, _ = _EXPORTERS[fmt]
+            with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as f:
                 tmp = f.name
             try:
-                JsonSvg(_json.loads(drawing.to_json()), canvas._orientation, tmp)
+                exporter(_json.loads(drawing.to_json()), canvas._orientation, tmp)
                 with open(tmp, 'rb') as f:
                     return f.read()
             finally:
@@ -628,27 +636,28 @@ class TuhiGUIApp(tk.Tk):
                 except OSError:
                     pass
 
-        def _save_svg():
+        def _save_as(fmt):
+            exporter, ext, label = _EXPORTERS[fmt]
             path = filedialog.asksaveasfilename(
                 parent=self,
-                defaultextension='.svg',
-                filetypes=[('SVG files', '*.svg'), ('All files', '*.*')],
-                initialfile=default_svg_name,
-                title='Save drawing as SVG',
+                defaultextension=ext,
+                filetypes=[(label, f'*{ext}'), ('All files', '*.*')],
+                initialfile=f'drawing_{safe_ts}{ext}',
+                title=f'Save drawing as {fmt}',
             )
             if not path:
                 return
             try:
-                svg_data = _get_svg_bytes()
+                data = _get_export_bytes(fmt)
                 with open(path, 'wb') as f:
-                    f.write(svg_data)
+                    f.write(data)
                 self._set_status(f'Saved: {os.path.basename(path)}')
             except Exception as e:
                 messagebox.showerror('Export failed', str(e))
 
         def _cloud_upload(provider_fn, provider_name, **kwargs):
             self._set_status(f'Uploading to {provider_name}…')
-            svg_data = _get_svg_bytes()
+            svg_data = _get_export_bytes('SVG')
 
             def _do():
                 try:
@@ -689,14 +698,16 @@ class TuhiGUIApp(tk.Tk):
             self._set_status(f'Deleted drawing from {ts}.')
 
         save_menu = tk.Menu(toolbar, tearoff=0)
-        save_menu.add_command(label='Save locally…', command=_save_svg)
+        save_menu.add_command(label='Save as SVG…', command=lambda: _save_as('SVG'))
+        save_menu.add_command(label='Save as PNG…', command=lambda: _save_as('PNG'))
+        save_menu.add_command(label='Save as PDF…', command=lambda: _save_as('PDF'))
         if _CLOUD_AVAILABLE:
             save_menu.add_separator()
-            save_menu.add_command(label='Google Drive', command=_save_google_drive)
-            save_menu.add_command(label='Dropbox', command=_save_dropbox)
-            save_menu.add_command(label='OneDrive', command=_save_onedrive)
+            save_menu.add_command(label='Google Drive (SVG)', command=_save_google_drive)
+            save_menu.add_command(label='Dropbox (SVG)', command=_save_dropbox)
+            save_menu.add_command(label='OneDrive (SVG)', command=_save_onedrive)
 
-        ttk.Menubutton(toolbar, text='Save SVG ▾', menu=save_menu).pack(side='left', padx=2)
+        ttk.Menubutton(toolbar, text='Export ▾', menu=save_menu).pack(side='left', padx=2)
         ttk.Button(toolbar, text='Delete', command=_delete_drawing).pack(side='left', padx=2)
 
         # × is in the tab label (ClosableNotebook handles the click)

@@ -27,7 +27,7 @@ Four ways to connect to the tablet are planned; three exist today.
 
 ### 2. Windows GUI app
 - Tkinter app (`src/tuhi_gui.py`), same core library and storage as the CLI.
-- Normal mode: Register / Listen / Fetch, drawing tabs with SVG export and delete.
+- Normal mode: Register / Listen / Fetch, drawing tabs with export (SVG / PNG / PDF) and delete.
 - Live mode: real-time pen strokes on a fullscreen canvas.
 - Distributed as portable EXE and installer (built by CI).
 
@@ -37,7 +37,7 @@ Four ways to connect to the tablet are planned; three exist today.
 - Drawings live locally (IndexedDB, always on) plus one **tiered** cloud provider:
   **Supabase Storage** (free, max 10 drawings) or **Google Drive** / **Dropbox** (paid).
   See "Web App — Cloud Storage" for the tier and sync rules.
-- Feature parity target with the desktop app: register, sync offline drawings, live mode, SVG export.
+- Feature parity target with the desktop app: register, sync offline drawings, live mode, export (SVG / PNG / PDF).
 - Currently being validated against real Bamboo Folio hardware.
 
 ### 4. ESP32 (planned)
@@ -438,6 +438,33 @@ Auth runs on **Supabase Auth**, client-side (no custom auth server). Methods, al
 The Google **Drive** OAuth in `docs/auth/storage_oauth.js` is separate from Supabase social
 login (it grants Drive `appdata` access, not app login). Its `client_secret` moves to the
 Worker in Phase 2.
+
+### Drawing export formats (SVG / PNG / PDF)
+
+Every drawing can be exported in three formats from both the **desktop GUI** and the **web app**.
+All three share the same coordinate/orientation transform (device units → output units, with the
+portrait/landscape swap and pressure-driven stroke width) so a drawing looks identical across formats.
+
+- **SVG** — the source-of-truth vector output. Pressure is preserved as per-segment `stroke-width`;
+  black strokes on a transparent background. Desktop: `JsonSvg` (`src/tuhi/export_win.py`, `svgwrite`).
+  Web: `drawingToSvg` (`docs/export/svg_export.js`).
+- **PNG** — raster image with a **transparent** background, black strokes.
+  Desktop: `JsonPng` renders with Pillow (`ImageDraw.line`, RGBA). Web: `drawingToPngBlob` rasterizes
+  the generated SVG onto an offscreen `<canvas>` and calls `canvas.toBlob('image/png')`.
+- **PDF** — a **single raster page** on a **white** background (PDF has no alpha, so strokes are
+  flattened onto white). Desktop: `JsonPdf` renders the same Pillow image, converts to RGB, and saves
+  via `Image.save(..., 'PDF')`. Web: `drawingToPdfBlob` rasterizes to a JPEG and embeds it in a
+  minimal, hand-built PDF (single `DCTDecode` image XObject). The hand-built PDF avoids any external
+  library so it works under the static site's strict CSP; page size is derived from the drawing's
+  millimetre dimensions.
+
+Shared implementation notes:
+- **No new dependencies.** Desktop reuses Pillow (already required for PNG); web uses only built-in
+  browser APIs (`<canvas>`, `toBlob`/`toDataURL`, `TextEncoder`).
+- **UI.** Desktop: each drawing tab has an **`Export ▾`** menu (`Save as SVG… / PNG… / PDF…`).
+  Web: each tab toolbar has **`Save SVG` / `Save PNG` / `Save PDF`** buttons; the PNG/PDF buttons
+  disable themselves while rendering. Default filename is `drawing_<timestamp>.<ext>`.
+- **Cloud upload** (desktop Google Drive / Dropbox / OneDrive) still uploads **SVG** only.
 
 ### Live-session sharing (planned)
 

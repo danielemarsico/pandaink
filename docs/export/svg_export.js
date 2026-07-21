@@ -118,13 +118,171 @@ function _buildSegments(points, ori, svgW, svgH) {
  * @param {string} filename  - Suggested filename (e.g. 'drawing_2024-01-15.svg').
  */
 export function downloadSvg(svgString, filename) {
-    const blob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a');
+    downloadBlob(new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' }), filename);
+}
+
+/**
+ * Trigger a browser download of an arbitrary Blob (PNG, PDF, …).
+ *
+ * @param {Blob}   blob     - File contents.
+ * @param {string} filename - Suggested filename.
+ */
+export function downloadBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a   = document.createElement('a');
     a.href     = url;
     a.download = filename;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+}
+
+// Longest side (in px) of the rendered raster used for PNG/PDF export.
+const RASTER_MAX_PX = 2000;
+
+// Output dimensions (device units / OUTPUT_SCALING), swapped for portrait.
+function _outputDims(drawing, orientation) {
+    const ori = orientation.toLowerCase();
+    const [rawW, rawH] = (drawing.dimensions && drawing.dimensions[0])
+        ? drawing.dimensions
+        : [21000, 14800];
+    const devW = rawW / OUTPUT_SCALING;
+    const devH = rawH / OUTPUT_SCALING;
+    return (ori === 'portrait' || ori === 'reverse-portrait')
+        ? { w: devH, h: devW }
+        : { w: devW, h: devH };
+}
+
+/**
+ * Render a drawing to an offscreen <canvas> by rasterizing its SVG.
+ *
+ * @param {object}      drawing     - Drawing record.
+ * @param {string}      orientation - Orientation string.
+ * @param {string|null} background  - Fill colour, or null for transparent.
+ * @returns {Promise<HTMLCanvasElement>}
+ */
+async function _rasterize(drawing, orientation, background) {
+    const { w: dw, h: dh } = _outputDims(drawing, orientation);
+    const scale = RASTER_MAX_PX / Math.max(dw, dh, 1);
+    const w = Math.max(1, Math.round(dw * scale));
+    const h = Math.max(1, Math.round(dh * scale));
+
+    const svg = drawingToSvg(drawing, orientation);
+    const url = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+    const img = new Image();
+    img.width = w;
+    img.height = h;
+    await new Promise((resolve, reject) => {
+        img.onload  = resolve;
+        img.onerror = () => reject(new Error('Failed to render drawing to image'));
+        img.src = url;
+    });
+
+    const canvas = document.createElement('canvas');
+    canvas.width  = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (background) {
+        ctx.fillStyle = background;
+        ctx.fillRect(0, 0, w, h);
+    }
+    ctx.drawImage(img, 0, 0, w, h);
+    return canvas;
+}
+
+/**
+ * Convert a drawing to a PNG Blob (transparent background).
+ *
+ * @param {object} drawing     - Drawing record.
+ * @param {string} orientation - Orientation string.
+ * @returns {Promise<Blob>}
+ */
+export async function drawingToPngBlob(drawing, orientation = 'portrait') {
+    const canvas = await _rasterize(drawing, orientation, null);
+    return await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+}
+
+/**
+ * Convert a drawing to a single-page PDF Blob (white background).
+ *
+ * The drawing is rasterized to a JPEG and embedded in a minimal, hand-built
+ * PDF — no external libraries, so it works under the static site's strict CSP.
+ *
+ * @param {object} drawing     - Drawing record.
+ * @param {string} orientation - Orientation string.
+ * @returns {Promise<Blob>}
+ */
+export async function drawingToPdfBlob(drawing, orientation = 'portrait') {
+    const canvas = await _rasterize(drawing, orientation, '#ffffff');
+    const jpegBytes = _dataUrlToBytes(canvas.toDataURL('image/jpeg', 0.92));
+
+    // Page size in PDF points; SVG output units correspond to millimetres.
+    const MM_TO_PT = 2.834645;
+    const { w: dw, h: dh } = _outputDims(drawing, orientation);
+    const pageW = (dw * MM_PER_UNIT * MM_TO_PT);
+    const pageH = (dh * MM_PER_UNIT * MM_TO_PT);
+
+    return _buildJpegPdf(jpegBytes, canvas.width, canvas.height, pageW, pageH);
+}
+
+function _dataUrlToBytes(dataUrl) {
+    const b64 = dataUrl.split(',')[1];
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
+}
+
+// Assemble a minimal single-image PDF (JPEG via DCTDecode) with a valid xref.
+function _buildJpegPdf(jpegBytes, imgW, imgH, pageW, pageH) {
+    const enc = new TextEncoder();
+    const chunks = [];
+    let pos = 0;
+    const offsets = {};
+
+    const push = (data) => {
+        const bytes = (typeof data === 'string') ? enc.encode(data) : data;
+        chunks.push(bytes);
+        pos += bytes.length;
+    };
+    const obj = (n, parts) => {
+        offsets[n] = pos;
+        push(`${n} 0 obj\n`);
+        for (const p of parts) push(p);
+        push('\nendobj\n');
+    };
+
+    const pw = pageW.toFixed(2);
+    const ph = pageH.toFixed(2);
+
+    push('%PDF-1.4\n');
+    obj(1, ['<< /Type /Catalog /Pages 2 0 R >>']);
+    obj(2, ['<< /Type /Pages /Kids [3 0 R] /Count 1 >>']);
+    obj(3, [`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pw} ${ph}] `
+          + `/Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >>`]);
+    obj(4, [
+        `<< /Type /XObject /Subtype /Image /Width ${imgW} /Height ${imgH} `
+        + `/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode `
+        + `/Length ${jpegBytes.length} >>\nstream\n`,
+        jpegBytes,
+        '\nendstream',
+    ]);
+    const content = `q\n${pw} 0 0 ${ph} 0 0 cm\n/Im0 Do\nQ\n`;
+    obj(5, [`<< /Length ${content.length} >>\nstream\n${content}\nendstream`]);
+
+    const xrefPos = pos;
+    const count = 6;
+    let xref = `xref\n0 ${count}\n0000000000 65535 f \n`;
+    for (let i = 1; i < count; i++) {
+        xref += String(offsets[i]).padStart(10, '0') + ' 00000 n \n';
+    }
+    push(xref);
+    push(`trailer\n<< /Size ${count} /Root 1 0 R >>\nstartxref\n${xrefPos}\n%%EOF`);
+
+    const total = chunks.reduce((n, c) => n + c.length, 0);
+    const out = new Uint8Array(total);
+    let o = 0;
+    for (const c of chunks) { out.set(c, o); o += c.length; }
+    return new Blob([out], { type: 'application/pdf' });
 }

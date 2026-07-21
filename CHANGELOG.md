@@ -7,6 +7,10 @@ Format: `## Unreleased` for pending changes; `## <version> — <date>` for relea
 
 ## Unreleased
 
+- feat: export drawings as PNG and PDF in addition to SVG, in both the desktop GUI and the web app.
+  Desktop tabs now have an `Export ▾` menu (Save as SVG… / PNG… / PDF…); web tabs gained Save PNG and
+  Save PDF buttons. PNG is a transparent raster, PDF is a single white page. No new dependencies (desktop
+  reuses Pillow; web uses built-in canvas APIs and a hand-built PDF that satisfies the site's strict CSP).
 - fix: `005_storage_cap.sql`'s cap-enforcement trigger rejected every free-plan cloud upload
   (not just the 11th) with `42702 ambiguous_column` — a local variable named `owner_id`
   collided with `storage.objects`'s own `owner_id` column under Postgres's default
