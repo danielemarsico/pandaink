@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Privacy Policy — PandaInk</title>
+  <meta name="description" content="PandaInk privacy policy — what data the app accesses, how it is used, and how to delete it. Includes the Google API Services Limited Use disclosure.">
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+</head>
+<body>
+
+  <!-- Navigation -->
+  <nav>
+    <div class="container">
+      <a class="nav-brand" href="index.html">PandaInk</a>
+      <ul class="nav-links">
+        <li><a href="index.html">Home</a></li>
+        <li><a href="features.html">Features</a></li>
+        <li><a href="download.html">Download</a></li>
+        <li><a href="app.html">Web App</a></li>
+        <li><a href="https://github.com/danielemarsico/pandaink" target="_blank" rel="noopener">GitHub</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <main>
+
+    <!-- Page header -->
+    <section style="padding-bottom:1.5rem;">
+      <div class="container">
+        <h1>Privacy Policy</h1>
+        <p><strong>Effective date:</strong> 21 July 2026</p>
+        <p>
+          PandaInk is a free, open-source app that syncs drawings from Wacom Bamboo SmartPads
+          (Spark, Slate, Folio) over Bluetooth LE and lets you keep them locally or in a cloud
+          location <em>you</em> control. This policy explains what data the app touches, why, and
+          how you can remove it. It covers the web app at
+          <code>danielemarsico.github.io/pandaink</code>; the desktop app stores everything
+          locally on your own PC and sends nothing to us.
+        </p>
+      </div>
+    </section>
+
+    <hr class="section-divider">
+
+    <section>
+      <div class="container">
+        <h2>The short version</h2>
+        <ul>
+          <li>Your drawings are stored <strong>on your device</strong> (in the browser) and,
+              optionally, in a cloud location <strong>you own and choose</strong> — your Google
+              Drive, your Dropbox, or the app's Supabase storage.</li>
+          <li>We do <strong>not</strong> sell your data, show ads, or use your drawings for any
+              purpose other than showing them back to you.</li>
+          <li>Bluetooth communication with your tablet happens entirely in your browser. Pen data
+              is not sent to our servers (the one exception — opt-in live sharing — is described
+              below).</li>
+          <li>You can delete any drawing, disconnect any provider, or delete your whole account at
+              any time.</li>
+        </ul>
+      </div>
+    </section>
+
+    <hr class="section-divider">
+
+    <section>
+      <div class="container">
+        <h2>What we collect and why</h2>
+
+        <h3>Account information</h3>
+        <p>
+          When you create an account we use <strong>Supabase</strong> (our authentication and
+          database provider) to store your email address and a display name. If you sign in with
+          <strong>Google</strong> or <strong>GitHub</strong>, we receive your email and basic
+          profile identifier from that provider to create your account. We use this only to sign
+          you in and associate your data with you.
+        </p>
+
+        <h3>Device registration</h3>
+        <p>
+          To reconnect to your tablet, we store the pairing identifier your tablet generates (a
+          6-byte device UUID), the protocol type, and a device name you provide. This lets the app
+          talk to your specific SmartPad; it is not personally identifying on its own.
+        </p>
+
+        <h3>Your drawings</h3>
+        <p>
+          Drawings are pen-stroke coordinates, timestamps, and tablet dimensions. They are always
+          saved <strong>locally in your browser</strong> (IndexedDB). If you connect a cloud
+          provider, each drawing is also copied there:
+        </p>
+        <ul>
+          <li><strong>Google Drive</strong> — stored in the hidden, app-private
+              <code>appDataFolder</code> of <em>your own</em> Drive. We can only see files this app
+              created; we cannot see the rest of your Drive.</li>
+          <li><strong>Dropbox</strong> — stored in this app's dedicated app folder inside
+              <em>your own</em> Dropbox.</li>
+          <li><strong>Supabase Storage</strong> — stored in a private, per-user folder on the app's
+              Supabase project (the free tier, limited to 10 drawings).</li>
+        </ul>
+
+        <h3>Cloud access tokens</h3>
+        <p>
+          When you connect Google Drive or Dropbox, we store the OAuth access/refresh tokens
+          (in Supabase, tied to your account) so the app can upload and read <em>your</em> drawings
+          without asking you to sign in every time. You can revoke these at any time by
+          disconnecting the provider in the app, or from your Google/Dropbox account settings.
+        </p>
+
+        <h3>Payments (Pro upgrade)</h3>
+        <p>
+          The optional Pro upgrade is a one-time purchase handled entirely by <strong>Ko-fi</strong>.
+          We never see or store your card details. Ko-fi notifies our backend of a completed
+          payment (including the payer email) so we can mark your account as Pro. Please use your
+          PandaInk account email when purchasing so the upgrade can be matched to your account.
+        </p>
+      </div>
+    </section>
+
+    <hr class="section-divider">
+
+    <section>
+      <div class="container">
+        <h2>Google user data — Limited Use disclosure</h2>
+        <p>
+          PandaInk requests the <code>https://www.googleapis.com/auth/drive.appdata</code> scope,
+          which grants access <strong>only</strong> to a hidden application-data folder that this
+          app creates in your Google Drive. It cannot read, modify, or delete any other file in
+          your Drive.
+        </p>
+        <p>
+          PandaInk's use and transfer of information received from Google APIs adheres to the
+          <a href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank" rel="noopener">Google
+          API Services User Data Policy</a>, including its <strong>Limited Use</strong>
+          requirements. Specifically, data obtained via Google APIs is used only to provide and
+          improve the app's drawing-storage feature for you, is not transferred to others except as
+          necessary to provide that feature or as required by law, is not used for advertising, and
+          is not read by humans except with your explicit consent, for security or to comply with
+          applicable law.
+        </p>
+      </div>
+    </section>
+
+    <hr class="section-divider">
+
+    <section>
+      <div class="container">
+        <h2>Bluetooth and live sharing</h2>
+        <p>
+          Connecting to your tablet uses the Web Bluetooth API, which runs entirely in your
+          browser. Pen data read from the tablet is processed locally and is <strong>not</strong>
+          transmitted to our servers as part of normal syncing.
+        </p>
+        <p>
+          If you explicitly turn on <strong>live sharing</strong>, the pen strokes of that session
+          are relayed in real time through our Cloudflare backend to viewers you share the link
+          with. This relay holds the strokes only for the moment they are forwarded and does not
+          store them. Live sharing is off unless you enable it.
+        </p>
+      </div>
+    </section>
+
+    <hr class="section-divider">
+
+    <section>
+      <div class="container">
+        <h2>Third-party services</h2>
+        <p>These providers process data on our behalf or at your direction. Their own privacy
+           policies apply:</p>
+        <ul>
+          <li><a href="https://supabase.com/privacy" target="_blank" rel="noopener">Supabase</a> — authentication, database, and free-tier storage.</li>
+          <li><a href="https://policies.google.com/privacy" target="_blank" rel="noopener">Google</a> — sign-in and Google Drive storage (at your choice).</li>
+          <li><a href="https://www.dropbox.com/privacy" target="_blank" rel="noopener">Dropbox</a> — cloud storage (at your choice).</li>
+          <li><a href="https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement" target="_blank" rel="noopener">GitHub</a> — sign-in (at your choice) and site hosting (GitHub Pages).</li>
+          <li><a href="https://www.cloudflare.com/privacypolicy/" target="_blank" rel="noopener">Cloudflare</a> — backend for secure token exchange and live sharing.</li>
+          <li><a href="https://more.ko-fi.com/privacy" target="_blank" rel="noopener">Ko-fi</a> — payments for the Pro upgrade and donations.</li>
+        </ul>
+      </div>
+    </section>
+
+    <hr class="section-divider">
+
+    <section>
+      <div class="container">
+        <h2>Data retention and deletion</h2>
+        <ul>
+          <li><strong>Delete a drawing</strong> — removes it from your device and, if connected,
+              from your cloud provider.</li>
+          <li><strong>Disconnect a provider</strong> — removes the stored access tokens for it.</li>
+          <li><strong>Forget a device</strong> — removes the stored pairing information.</li>
+          <li><strong>Delete your account</strong> — permanently removes your profile, device
+              registration, and stored cloud tokens. Drawings kept in your own Google Drive or
+              Dropbox remain under your control and can be deleted from those services directly.</li>
+        </ul>
+      </div>
+    </section>
+
+    <hr class="section-divider">
+
+    <section>
+      <div class="container">
+        <h2>Children</h2>
+        <p>PandaInk is not directed to children under 13, and we do not knowingly collect data from
+           them.</p>
+
+        <h2>Changes to this policy</h2>
+        <p>We may update this policy as the app evolves. Material changes will be reflected here
+           with a new effective date; the history is public in the project's Git repository.</p>
+
+        <h2>Contact</h2>
+        <p>
+          Questions about this policy or your data? Email
+          <a href="mailto:marsicod@gmail.com">marsicod@gmail.com</a> or open an issue on
+          <a href="https://github.com/danielemarsico/pandaink" target="_blank" rel="noopener">GitHub</a>.
+        </p>
+      </div>
+    </section>
+  </main>
+
+  <!-- Footer -->
+  <footer>
+    <div class="container">
+      <div>Released under the <strong>GPLv2</strong> license.</div>
+      <div class="footer-links">
+        <span>Based on <a href="https://github.com/tuhiproject/tuhi" target="_blank" rel="noopener">Tuhi</a></span>
+        <span><a href="https://github.com/danielemarsico/pandaink" target="_blank" rel="noopener">GitHub</a></span>
+        <span><a href="privacy.html">Privacy</a></span>
+        <span><a class="kofi-link" href="https://ko-fi.com/dan1elsan" target="_blank" rel="noopener">☕ Support on Ko-fi</a></span>
+      </div>
+    </div>
+  </footer>
+
+</body>
+</html>

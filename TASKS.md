@@ -282,5 +282,9 @@ Code implemented in `worker/` (`wrangler.toml` + `src/index.js`). Replaces the R
 - [ ] **Offline message** — If `getValidAccessToken()` fails due to network error, show "Offline — connect to load drawings" instead of an unhandled error
 - [ ] **Drive quota in profile** — Show Google Drive storage used/available in the Profile panel (GET `/drive/v3/about?fields=storageQuota`)
 - [ ] **Drive account email in profile** — Show the connected Google account email in the Profile panel (from token userinfo endpoint)
-- [ ] **Privacy policy** — Create `docs/privacy.html` (required for Google OAuth app verification)
+- [x] **Privacy policy** — `docs/privacy.html` created (covers data collected, third-party
+      services, Google Limited Use disclosure, retention/deletion, contact) and linked from
+      every page footer. Admin: paste its URL
+      (`https://danielemarsico.github.io/pandaink/privacy.html`) into the Google OAuth consent
+      screen, and update the contact email if `marsicod@gmail.com` isn't the one you want public
 - [ ] **Submit for Google verification** — Once privacy policy is live and app is stable, submit OAuth consent screen for Google verification (unlocks >100 users without manual test-user whitelisting)
