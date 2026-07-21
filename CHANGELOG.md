@@ -7,6 +7,11 @@ Format: `## Unreleased` for pending changes; `## <version> — <date>` for relea
 
 ## Unreleased
 
+- docs: add a "Ko-fi Pro unlock (admin)" section to README.md with Table Editor / SQL Editor
+  steps for manually granting Pro when a buyer's Ko-fi email doesn't match their PandaInk account
+  (the webhook's email-match unlock silently no-ops in that case)
+- feat: the Profile panel's Upgrade-to-Pro banner now reminds the user to pay with the same email
+  as their PandaInk account, since that's how the Ko-fi webhook matches the purchase to unlock Pro
 - feat: move the Google Drive OAuth "authorize" step server-side — the Worker now exposes
   `GET /oauth/google/authorize`, which builds the Google consent-screen URL using the Client ID
   (a Worker secret) and redirects the browser to it. `docs/auth/storage_oauth.js` no longer ships

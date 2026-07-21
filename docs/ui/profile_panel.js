@@ -268,6 +268,8 @@ export class ProfilePanel {
   ${KOFI_PRO_URL
       ? `<a class="btn-kofi btn-small" href="${KOFI_PRO_URL}" target="_blank" rel="noopener" style="text-decoration:none;display:inline-block;">☕ Upgrade to Pro</a>`
       : '<span class="pp-muted">(upgrade link not set up yet)</span>'}
+  <p class="pp-muted pp-hint">Use the same email at checkout as this account (${this._user.email ?? ''}) — Pro
+     unlocks automatically by matching that email; a different email needs a manual fix.</p>
 </div>`;
 
         row.innerHTML = `

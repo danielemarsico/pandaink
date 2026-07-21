@@ -201,6 +201,31 @@ After completing the setup:
 4. Register your Wacom device — you should see a new row in the `devices` table.
 5. Sync a drawing — a file `drawing_<timestamp>.json` should appear in your Google Drive appDataFolder.
 
+### 6. Ko-fi Pro unlock (admin)
+
+Pro is a one-time $5 Ko-fi purchase. The Cloudflare Worker's `/kofi/webhook` unlocks it
+automatically by matching the **Ko-fi payer's email** to a Supabase Auth user and setting
+`profiles.plan = 'pro'` (see `worker/src/index.js`). If someone pays with a different email than
+their PandaInk account, the webhook finds no match and does nothing — no error is shown to them
+or to you, so you won't notice unless you compare Ko-fi's payment history against `profiles.plan`.
+
+To manually grant Pro in that case:
+
+**Table Editor:**
+1. Supabase dashboard → **Authentication → Users** → find the buyer's `id` from their email.
+2. **Table Editor → `profiles`** → find the row with that `id` → edit `plan` to `pro` → save.
+
+**Or SQL Editor** (faster if you already have the email):
+```sql
+update public.profiles
+set plan = 'pro'
+where id = (select id from auth.users where email = 'the-buyers-email@example.com');
+```
+
+This works from the dashboard because it runs with a privileged connection that bypasses the RLS
+policy in `003_plan.sql` — that policy only blocks a **user's own** JWT from self-upgrading, not
+an admin using the SQL editor or service-role key.
+
 ---
 
 ## Windows App
