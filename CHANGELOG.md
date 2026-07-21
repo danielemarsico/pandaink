@@ -7,6 +7,15 @@ Format: `## Unreleased` for pending changes; `## <version> — <date>` for relea
 
 ## Unreleased
 
+- fix: cloud sync silently under-reported failures — `_cmdCloudSync()` always printed "Cloud
+  sync complete." after a sync pass even when individual drawing uploads failed inside it, and
+  `_retryPendingUploads()` only logged those failures to the console with no visible status.
+  The status bar now shows the real error (e.g. "2 not yet in cloud — <actual error>") instead
+  of a false success message
+- fix: after `_retryPendingUploads()` marks a drawing as uploaded, the drawing list wasn't
+  re-rendered, so its badge stayed on ☁↑ (pending) instead of flipping to ☁✓ even on success
+- chore: remove completed ([x]) items from TASKS.md now that they're done; history lives in
+  git log / CHANGELOG.md going forward
 - feat: add migration `005_storage_cap.sql` — a `BEFORE INSERT` trigger on `storage.objects`
   that authoritatively enforces the free-plan 10-drawing cap server-side, so a bypassed or
   modified client can no longer upload past it (the existing client-side check in

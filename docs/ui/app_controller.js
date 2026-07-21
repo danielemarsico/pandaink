@@ -561,6 +561,7 @@ export class AppController {
     async _loadStoredDrawings() {
         if (!this._deviceInfo) return;
         this._cloudOffline = false;
+        this._uploadError  = null;
         try {
             this._setStatus('Loading drawings…');
             // Local store is the source of truth — always works, cloud or not.
@@ -585,6 +586,10 @@ export class AppController {
                 } finally {
                     if (cloudBtn) { cloudBtn.disabled = false; cloudBtn.textContent = prevLabel; }
                 }
+                // _retryPendingUploads() flips d.uploaded on drawings already in
+                // this._drawings without re-rendering -- refresh the tab badges
+                // (☁↑ -> ☁✓) now that uploads may have completed.
+                this._renderDrawingList();
             }
 
             const total = this._drawings.length;
@@ -598,6 +603,8 @@ export class AppController {
             const pending = this._drawings.filter((d) => !d.uploaded).length;
             if (this._cloudOffline) {
                 this._setStatus(`${total} drawing(s) loaded locally (offline — cloud drawings unavailable).`);
+            } else if (this._uploadError) {
+                this._setStatus(`${total} drawing(s) loaded (${pending} not yet in cloud — ${this._uploadError}).`);
             } else if (pending && cloudOn) {
                 this._setStatus(`${total} drawing(s) loaded (${pending} not yet in cloud).`);
             } else {
@@ -617,7 +624,12 @@ export class AppController {
         this._setStatus('Syncing with cloud…');
         try {
             await this._loadStoredDrawings();
-            this._setStatus('Cloud sync complete.');
+            // Don't stomp a more specific status (offline / upload error) that
+            // _loadStoredDrawings() already set -- only claim success when
+            // nothing actually went wrong.
+            if (!this._cloudOffline && !this._uploadError) {
+                this._setStatus('Cloud sync complete.');
+            }
         } catch (e) {
             this._setStatus('Cloud sync failed: ' + e.message);
         } finally {
@@ -655,10 +667,12 @@ export class AppController {
     }
 
     // Upload any locally-saved drawings that never made it to the cloud. Runs only
-    // when a provider is connected; failures are logged and left pending. A free-tier
-    // cap error stops the loop (further uploads would fail the same way); a network
-    // error also stops the loop early — every remaining item would fail the same way.
+    // when a provider is connected. A free-tier cap error or a network error stops
+    // the loop early (every remaining item would fail the same way); any other
+    // per-drawing failure is logged, left pending, and recorded in this._uploadError
+    // so the caller can surface it instead of falsely reporting success.
     async _retryPendingUploads() {
+        let failed = 0;
         for (const d of this._drawings) {
             if (d.uploaded) continue;
             try {
@@ -668,10 +682,13 @@ export class AppController {
                 d.driveFileId = saved.driveFileId;
             } catch (e) {
                 console.warn('Pending upload retry failed:', e);
-                if (e.code === 'CAP_REACHED') break;
+                if (e.code === 'CAP_REACHED') { this._uploadError = e.message; break; }
                 if (isNetworkError(e)) { this._cloudOffline = true; break; }
+                failed++;
+                this._uploadError = e.message;
             }
         }
+        if (failed > 1) this._uploadError = `${failed} uploads failed, last error: ${this._uploadError}`;
     }
 
     // Whether the active cloud provider is connected. Any error (offline, no
