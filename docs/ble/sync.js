@@ -35,7 +35,6 @@ import {
     REPLY_CONNECT_OK,
     REPLY_CONNECT_FAIL,
     MODE_PAPER,
-    MODE_IDLE,
     FILE_TRANSFER_ARGS,
     PROTOCOL_SPARK,
 } from './protocol_constants.js';
@@ -992,9 +991,9 @@ export async function syncDrawings(bleManager, deviceInfo, opts = {}) {
 
     if (onProgress) onProgress(fileCount, fileCount);
 
-    // 14. Return device to idle
-    const idleReply = await exchange(bleManager, OPCODE_SET_MODE, [MODE_IDLE]);
-    checkAckReply(idleReply, 'idle mode');
-
+    // Deliberately do NOT switch the device back to idle mode here -- the
+    // reference (wacom_win.py's retrieve_data()) leaves it in paper mode
+    // (set in step 7, above) after sync. Idle mode may stop the tablet from
+    // recording new offline drawings until the next connection re-authorizes it.
     return { drawings, dimensions };
 }

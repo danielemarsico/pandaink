@@ -170,7 +170,9 @@ The device rejects file operations unless this exact handshake runs first
       `crc32(concatenated pen data)` and fail the sync on mismatch.
    d. Parse the stroke file (format below).
    e. DELETE_OLDEST (so the next GET_STROKES sees the following file).
-10. SET_MODE idle (`0x02`).
+10. Deliberately do **not** SET_MODE idle after sync — leave the device in the
+    paper mode set in step 7. Idle mode may stop the tablet from recording new
+    offline drawings until the next connection re-authorizes it.
 
 ### Stroke file binary format
 
@@ -238,7 +240,11 @@ provider from `profiles.storage_provider` and gates the paid ones on `profiles.p
   Payments run through **Ko-fi** (`https://ko-fi.com/dan1elsan`); see "Pro unlock via Ko-fi".
 - The Supabase Storage **10-drawing cap** is enforced when saving: at the cap, saving a new
   drawing must fail with a clear message telling the user to delete old drawings (or upgrade
-  to a paid provider) — it must **never silently drop a drawing**.
+  to a paid provider) — it must **never silently drop a drawing**. Enforced in two layers:
+  `supabase_store.js` blocks the 11th drawing client-side (for a fast, friendly error message),
+  and migration `005_storage_cap.sql` adds a `BEFORE INSERT` trigger on `storage.objects` that
+  authoritatively rejects it server-side for `plan = 'free'` users even if the client check is
+  bypassed. Overwriting an existing drawing (same object name) never counts against the cap.
 
 ### Provider selection rules
 
@@ -376,8 +382,9 @@ Division of responsibilities:
   Google-Identity-Services approach in `.claude/plans/gdrive-secretless-auth.md`), account
   deletion (Supabase service-role), and the **Ko-fi Pro-unlock webhook**. **Dropbox** uses
   secretless PKCE and stays fully in the browser — no Worker endpoint. Supabase Storage cap
-  enforcement is client-side today (RLS-scoped); authoritative server-side enforcement is a
-  documented follow-up.
+  enforcement is client-side (fast UX) **and** authoritative server-side via a Postgres
+  trigger (migration `005_storage_cap.sql`, not the Worker — uploads go straight from the
+  browser to Supabase Storage, so the database itself is the right enforcement point).
 - **Worker owns live-session broadcast**: a **Durable Object** per live session holds the
   WebSocket connections; the drawing user's browser publishes captured strokes to it and the
   Worker fans them out to authenticated viewers in real time. (Capture is always browser-side;

@@ -7,6 +7,26 @@ Format: `## Unreleased` for pending changes; `## <version> — <date>` for relea
 
 ## Unreleased
 
+- feat: add migration `005_storage_cap.sql` — a `BEFORE INSERT` trigger on `storage.objects`
+  that authoritatively enforces the free-plan 10-drawing cap server-side, so a bypassed or
+  modified client can no longer upload past it (the existing client-side check in
+  `supabase_store.js` still gives the fast, friendly error message; this is the backstop)
+- feat: Profile → Cloud Storage now shows the connected Google Drive account's email and
+  storage usage (`gdrive_store.js`'s new `getAccountInfo()`, via Drive's `about` endpoint —
+  works with the `drive.appdata`-only scope, unlike the OAuth userinfo endpoint)
+- feat: the drawings list now shows a loading state ("Sync now" button relabeled "Checking
+  cloud…", status line updated) while cloud reconciliation runs, and reports "offline — cloud
+  drawings unavailable" instead of silently showing a plain drawing count when a cloud fetch
+  fails due to a network error rather than an API/auth error
+- fix: offline sync no longer sends `SET_MODE idle` after finishing — it left the tablet unable
+  to record new offline drawings until the next connection re-authorized it; the device now
+  stays in the paper mode set earlier in the same handshake
+- fix: `live.js`'s `startLive()` sent CONNECT and `SET_MODE live` fire-and-forget, so a device
+  rejection (not ready, wrong state) went unnoticed and live mode would silently never receive
+  data; both commands are now ACK-checked and throw a clear error immediately
+- fix: `register.js`'s `waitForNotification()` had the same `stopNotify()` race already fixed in
+  `sync.js`'s `exchange()` — resolving before the BLE stack's unsubscribe finished could let an
+  in-flight cleanup silently turn notifications back off right as the next wait started listening
 - docs: add a "Ko-fi Pro unlock (admin)" section to README.md with Table Editor / SQL Editor
   steps for manually granting Pro when a buyer's Ko-fi email doesn't match their PandaInk account
   (the webhook's email-match unlock silently no-ops in that case)

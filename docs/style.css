@@ -894,18 +894,16 @@ footer .footer-links {
 
 .pp-provider-list { display: flex; flex-direction: column; gap: 0.35rem; }
 .pp-provider-opt {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.9rem;
   padding: 0.35rem 0.4rem;
   border: 1px solid #e2e2e2;
   border-radius: 5px;
 }
 .pp-provider-opt.pp-locked { opacity: 0.6; }
+.pp-provider-row { display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; }
 .pp-provider-opt .pp-provider-name { flex: 1; font-weight: 600; }
 .pp-provider-tier { font-size: 0.72rem; color: #888; }
 .pp-provider-action { margin-left: 0.4rem; }
+.pp-provider-detail { font-size: 0.78rem; margin-top: 0.2rem; padding-left: 1.7rem; }
 
 .pp-upgrade {
   margin-top: 0.6rem;

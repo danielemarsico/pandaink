@@ -27,6 +27,15 @@ import * as localStore from '../storage/idb_store.js';
 // Cloud abstraction — the active tier-gated provider (Supabase / Drive / Dropbox).
 import * as cloudStore  from '../storage/cloud_store.js';
 
+// True for network-level failures (offline, DNS, CORS-preflight) as opposed to
+// auth/API errors returned by the provider itself -- fetch() rejects with a
+// TypeError in this case (exact message varies by browser: "Failed to fetch",
+// "NetworkError when attempting to fetch resource.", "Load failed").
+function isNetworkError(e) {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return true;
+    return e instanceof TypeError;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // AppController
 // ─────────────────────────────────────────────────────────────────────────────
@@ -551,6 +560,7 @@ export class AppController {
 
     async _loadStoredDrawings() {
         if (!this._deviceInfo) return;
+        this._cloudOffline = false;
         try {
             this._setStatus('Loading drawings…');
             // Local store is the source of truth — always works, cloud or not.
@@ -566,15 +576,29 @@ export class AppController {
             // With a provider connected: pull cloud-only drawings into the local
             // list (cross-device), then retry any local pending uploads.
             if (cloudOn) {
-                await this._reconcileCloud();
-                await this._retryPendingUploads();
+                const prevLabel = cloudBtn?.textContent;
+                if (cloudBtn) { cloudBtn.disabled = true; cloudBtn.textContent = 'Checking cloud…'; }
+                this._setStatus(`${this._drawings.length} drawing(s) loaded locally — checking cloud for others…`);
+                try {
+                    await this._reconcileCloud();
+                    await this._retryPendingUploads();
+                } finally {
+                    if (cloudBtn) { cloudBtn.disabled = false; cloudBtn.textContent = prevLabel; }
+                }
             }
 
             const total = this._drawings.length;
-            if (total === 0) { this._setStatus('No drawings yet.'); return; }
+            if (total === 0) {
+                this._setStatus(this._cloudOffline
+                    ? 'Offline — connect to load drawings from the cloud.'
+                    : 'No drawings yet.');
+                return;
+            }
 
             const pending = this._drawings.filter((d) => !d.uploaded).length;
-            if (pending && cloudOn) {
+            if (this._cloudOffline) {
+                this._setStatus(`${total} drawing(s) loaded locally (offline — cloud drawings unavailable).`);
+            } else if (pending && cloudOn) {
                 this._setStatus(`${total} drawing(s) loaded (${pending} not yet in cloud).`);
             } else {
                 this._setStatus(`${total} drawing(s) loaded.`);
@@ -626,12 +650,14 @@ export class AppController {
             }
         } catch (e) {
             console.warn('Cloud reconciliation failed:', e);
+            if (isNetworkError(e)) this._cloudOffline = true;
         }
     }
 
     // Upload any locally-saved drawings that never made it to the cloud. Runs only
     // when a provider is connected; failures are logged and left pending. A free-tier
-    // cap error stops the loop (further uploads would fail the same way).
+    // cap error stops the loop (further uploads would fail the same way); a network
+    // error also stops the loop early — every remaining item would fail the same way.
     async _retryPendingUploads() {
         for (const d of this._drawings) {
             if (d.uploaded) continue;
@@ -643,6 +669,7 @@ export class AppController {
             } catch (e) {
                 console.warn('Pending upload retry failed:', e);
                 if (e.code === 'CAP_REACHED') break;
+                if (isNetworkError(e)) { this._cloudOffline = true; break; }
             }
         }
     }

@@ -9,13 +9,87 @@
 
 import {
     NORDIC_UART_CHRC_TX_UUID,
+    NORDIC_UART_CHRC_RX_UUID,
     WACOM_CHRC_LIVE_PEN_DATA_UUID,
     OPCODE_CONNECT,
     OPCODE_SET_MODE,
     REPLY_CONNECT_OK,
+    REPLY_CONNECT_FAIL,
+    REPLY_ACK,
     MODE_LIVE,
     MODE_IDLE,
 } from './protocol_constants.js';
+
+const ERR_INVALID_STATE = 0x02;
+
+// Send a command and wait for the next notification on RX (ports sync.js's
+// exchange() so CONNECT/SET_MODE failures surface instead of being sent
+// fire-and-forget). Must subscribe before writing, and stopNotify() must
+// finish before resolving, or a still-in-flight cleanup from this command can
+// race the next exchange()'s startNotify() -- see the matching comment in
+// sync.js for why.
+async function exchange(bleManager, opcode, args = [], timeoutMs = 8000) {
+    const pkt = buildPacket(opcode, new Uint8Array(args));
+
+    let resolveReply, rejectReply;
+    const replyPromise = new Promise((resolve, reject) => {
+        resolveReply = resolve;
+        rejectReply  = reject;
+    });
+    const timer = setTimeout(
+        () => rejectReply(new Error(`Timeout waiting for reply to 0x${opcode.toString(16)}`)),
+        timeoutMs
+    );
+
+    try {
+        await bleManager.startNotify(NORDIC_UART_CHRC_RX_UUID, (dv) => {
+            clearTimeout(timer);
+            bleManager.stopNotify(NORDIC_UART_CHRC_RX_UUID)
+                .catch(() => {})
+                .then(() => resolveReply(dv));
+        });
+        await bleManager.writeCharacteristic(NORDIC_UART_CHRC_TX_UUID, pkt);
+    } catch (err) {
+        clearTimeout(timer);
+        throw err;
+    }
+
+    return replyPromise;
+}
+
+const NOT_READY_MSG =
+    'The device is not ready for live mode. Press the button on the device until the ' +
+    'LED is solid green, then try again.';
+
+// CONNECT may reply with the dedicated 0x50/0x51 opcodes (Intuos Pro) or the
+// generic ACK (0xb3) used by Spark/Slate/Folio -- ports sync.js's connectAuthorized.
+function checkConnectReply(reply) {
+    const opcode = reply.getUint8(0);
+    if (opcode === REPLY_CONNECT_OK) return;
+    if (opcode === REPLY_ACK) {
+        const status = reply.getUint8(2);
+        if (status === 0x00) return;
+        if (status === ERR_INVALID_STATE) throw new Error(NOT_READY_MSG);
+        throw new Error(`Device rejected connection (error code 0x${status.toString(16)})`);
+    }
+    if (opcode === REPLY_CONNECT_FAIL) {
+        const reason = reply.getUint8(2 + 6); // after the 6-byte echoed uuid
+        throw new Error(`Device rejected connection (reason 0x${reason.toString(16)})`);
+    }
+    throw new Error(`Unexpected connect reply (opcode 0x${opcode.toString(16)})`);
+}
+
+function checkAckReply(reply, label) {
+    const opcode = reply.getUint8(0);
+    if (opcode !== REPLY_ACK) {
+        throw new Error(`Unexpected reply to ${label} (opcode 0x${opcode.toString(16)})`);
+    }
+    const status = reply.getUint8(2);
+    if (status === ERR_INVALID_STATE) throw new Error(NOT_READY_MSG);
+    if (status !== 0x00) {
+        throw new Error(`Device rejected ${label} (error code 0x${status.toString(16)})`);
+    }
+}
 
 function buildPacket(opcode, args) {
     const data = new Uint8Array(2 + args.length);
@@ -96,12 +170,12 @@ export async function startLive(bleManager, deviceInfo, onPenPoint) {
     const uuidBytes = hexBytes(uuid);
 
     // Authenticate with the device
-    const connectPkt = buildPacket(OPCODE_CONNECT, uuidBytes);
-    await bleManager.writeCharacteristic(NORDIC_UART_CHRC_TX_UUID, connectPkt);
+    const connectReply = await exchange(bleManager, OPCODE_CONNECT, uuidBytes);
+    checkConnectReply(connectReply);
 
     // Switch device to live mode
-    const modePkt = buildPacket(OPCODE_SET_MODE, new Uint8Array([MODE_LIVE]));
-    await bleManager.writeCharacteristic(NORDIC_UART_CHRC_TX_UUID, modePkt);
+    const modeReply = await exchange(bleManager, OPCODE_SET_MODE, [MODE_LIVE]);
+    checkAckReply(modeReply, 'live mode');
 
     // Subscribe to live pen-data notifications
     await bleManager.startNotify(WACOM_CHRC_LIVE_PEN_DATA_UUID, (dv) => {
@@ -111,9 +185,12 @@ export async function startLive(bleManager, deviceInfo, onPenPoint) {
     return {
         async stop() {
             await bleManager.stopNotify(WACOM_CHRC_LIVE_PEN_DATA_UUID);
-            const idlePkt = buildPacket(OPCODE_SET_MODE, new Uint8Array([MODE_IDLE]));
-            await bleManager.writeCharacteristic(NORDIC_UART_CHRC_TX_UUID, idlePkt)
-                .catch(() => {});
+            // Best-effort: stopping a live session shouldn't throw even if the
+            // device doesn't ACK cleanly on the way out.
+            try {
+                const idleReply = await exchange(bleManager, OPCODE_SET_MODE, [MODE_IDLE]);
+                checkAckReply(idleReply, 'idle mode');
+            } catch { /* ignore */ }
         },
     };
 }

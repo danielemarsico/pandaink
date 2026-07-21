@@ -41,6 +41,13 @@ function hexToBytes(hex) {
 // accept: optional predicate (DataView) => bool. When provided, intermediate
 // notifications that fail the predicate are silently skipped so callers can
 // filter out ACKs without losing the real reply.
+//
+// stopNotify() must finish before resolving, or a still-in-flight cleanup from
+// THIS wait can race the next waitForNotification()'s startNotify() -- ble_
+// manager.js's stopNotify() captures the handler and un-registers it based on
+// stale state if a new handler was already installed by then, silently
+// turning notifications back off right as the next wait starts listening
+// (same bug already fixed in sync.js's exchange()).
 function waitForNotification(bleManager, timeoutMs = 15000, accept = null) {
     return new Promise((resolve, reject) => {
         const timer = setTimeout(() => {
@@ -50,8 +57,9 @@ function waitForNotification(bleManager, timeoutMs = 15000, accept = null) {
         bleManager.startNotify(NORDIC_UART_CHRC_RX_UUID, (dataView) => {
             if (accept && !accept(dataView)) return; // skip, keep listening
             clearTimeout(timer);
-            bleManager.stopNotify(NORDIC_UART_CHRC_RX_UUID).catch(() => {});
-            resolve(dataView);
+            bleManager.stopNotify(NORDIC_UART_CHRC_RX_UUID)
+                .catch(() => {})
+                .then(() => resolve(dataView));
         });
     });
 }

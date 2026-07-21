@@ -15,6 +15,9 @@ Do them at your own pace; each is independent unless noted.
       widens `storage_provider`, tightens RLS so users can't self-upgrade).
 - [x] **Run migration `004_storage.sql`** (creates the private `drawings` bucket + owner-only
       RLS for the free Supabase Storage tier).
+- [ ] **Run migration `005_storage_cap.sql`** in the Supabase SQL editor (adds a `BEFORE INSERT`
+      trigger on `storage.objects` that authoritatively enforces the free-plan 10-drawing cap
+      server-side, closing the gap where a bypassed/modified client could upload past it).
 - [x] **Enable GitHub login** — create a GitHub OAuth App
       (github.com/settings/developers → callback `https://qqsbcovjvhmpypzglbyq.supabase.co/auth/v1/callback`),
       then Supabase → Authentication → Providers → GitHub (paste client id/secret).
@@ -99,6 +102,11 @@ These need the admin steps above finished first. Grouped by which admin action u
       after). A normal field (`display_name`) updated fine in the same request shape, confirming
       the policy targets `plan` specifically, not all self-updates. Test user deleted afterward
       (profile row cascaded, confirmed empty on re-query).
+
+**After migration `005_storage_cap.sql` is run:**
+- [ ] Verify the trigger actually rejects an 11th drawing for a free-plan user uploaded
+      *directly* against the Storage REST API (bypassing `supabase_store.js`'s client-side
+      check) — confirms the cap is real, not just a UX nicety.
 
 **After `DROPBOX_CLIENT_ID` is set (and a Pro account):**
 - [ ] Connect Dropbox, sync a drawing, confirm `drawing_<ts>.json` lands in the app folder and
@@ -205,13 +213,21 @@ real hardware even now that the BLE-layer (GATT/notify) bugs are fixed.
         before parsing fields; raise a clear error on mismatch (done in
         `parseFileCount` / `parseGetStrokesReply` — also bounds-guards every field
         read so a short "no drawings" ACK no longer crashes with a DataView error)
-  - [ ] Don't send `SET_MODE idle` after sync — Python leaves the device in paper mode;
-        idle may stop the tablet recording new offline drawings
+  - [x] Don't send `SET_MODE idle` after sync — Python leaves the device in paper mode;
+        idle may stop the tablet recording new offline drawings. `sync.js` `syncDrawings()`
+        no longer sends the final `SET_MODE idle`; device stays in the paper mode set in
+        step 7. Only the hardware smoke-test remains (does a synced-then-drawn session
+        still record correctly with no idle call in between).
   - [ ] Port `register_device_finish()` (Slate: set time, transfer-GATT select, name,
         dimensions, firmware, battery) into the web registration flow
-  - [ ] Make live.js ACK-check CONNECT and SET_MODE instead of fire-and-forget
-  - [ ] Fix the fire-and-forget `stopNotify()` race in register.js `waitForNotification()`
-        (same bug already fixed in sync.js `exchange()`)
+  - [x] Make live.js ACK-check CONNECT and SET_MODE instead of fire-and-forget —
+        `startLive()` now waits for and validates the CONNECT and `SET_MODE live` replies
+        (throws a clear "device not ready" / rejection error instead of silently proceeding
+        with no data ever arriving); `stop()`'s `SET_MODE idle` stays best-effort (swallows
+        errors — cleanup on exit shouldn't throw)
+  - [x] Fix the fire-and-forget `stopNotify()` race in register.js `waitForNotification()`
+        (same bug already fixed in sync.js `exchange()`) — `stopNotify()` now finishes
+        before resolving, matching the sync.js fix
   - [x] Audit units: Python multiplies coords by point size (10 µm) and normalizes
         pressure to 16-bit; JS returned raw device units — fixed in `sync.js`
         `scaleStrokes()` (coords × point size → µm to match `dimensions`, pressure
@@ -270,7 +286,12 @@ testing (see "Blocked on Daniele's manual actions").
 - [x] **S2 — Supabase Storage provider (free tier, 10-drawing cap)** — `supabase_store.js`
       (upload/list/download/delete via the session token) + migration `004_storage.sql`
       (private `drawings` bucket, owner-only RLS). Client-side cap check throws `CAP_REACHED`
-      at 10. (Admin: run the migration. Follow-up: authoritative Worker-side cap.)
+      at 10. (Admin: run the migration.) Authoritative server-side cap: see S2c below.
+- [x] **S2c — Authoritative server-side 10-drawing cap** — migration `005_storage_cap.sql`
+      adds a `BEFORE INSERT` trigger (`enforce_drawing_cap`) on `storage.objects` that rejects
+      an 11th drawing for `plan = 'free'` users even if the client-side check is bypassed
+      (a modified/direct API call). Pro users and overwrites of an existing object are
+      unaffected. (Admin: run the migration in the Supabase SQL editor, after 001-004.)
 - [x] **S2b — Dropbox provider (paid tier)** — `dropbox_store.js` + `dropbox_oauth.js`
       (secretless PKCE, no Worker needed); tokens in `storage_tokens` (`provider='dropbox'`).
       (Admin: create the Dropbox app + set `DROPBOX_CLIENT_ID`.)
@@ -280,7 +301,6 @@ testing (see "Blocked on Daniele's manual actions").
 - [x] **S4 — Auto background + manual sync, and cloud/local badges** — auto-upload after
       device sync; on load, retry pending + reconcile cloud-only drawings into the local list;
       manual "Sync now" button; per-drawing badge (☁✓ synced / ☁↑ pending / ● local).
-- [ ] Follow-up: authoritative Worker-side 10-drawing cap enforcement (client check today).
 - [ ] Follow-up: lazy "cloud-only, not cached" (☁↓) state — reconciliation caches eagerly now.
 - [ ] Follow-up (decide with user): migration-on-switch between providers.
 
@@ -307,8 +327,10 @@ Code implemented in `worker/` (`wrangler.toml` + `src/index.js`). Replaces the R
       WebSocket relay (token-gated).
 - [x] **W-BE6 — Ko-fi webhook → Pro unlock** — `/kofi/webhook` verifies the token, matches the
       payer email to a Supabase user, sets `profiles.plan='pro'`.
-- [ ] **W-BE3 — Authoritative Supabase-Storage cap** — enforce the 10-cap server-side (client
-      pre-check exists). Follow-up.
+- [x] **W-BE3 — Authoritative Supabase-Storage cap** — implemented as a Postgres trigger
+      (migration `005_storage_cap.sql`, see S2c), not a Worker route — uploads go straight
+      from the browser to Supabase Storage, so the Worker is never in that path; the
+      database itself is the correct enforcement point.
 
 ### Live-session sharing (frontend)
 
@@ -319,10 +341,21 @@ Code implemented in `worker/` (`wrangler.toml` + `src/index.js`). Replaces the R
 
 ### Phase 5 — Polish
 
-- [ ] **Loading spinner** — Show skeleton or spinner in the drawings list while Google Drive files are being fetched
-- [ ] **Offline message** — If `getValidAccessToken()` fails due to network error, show "Offline — connect to load drawings" instead of an unhandled error
-- [ ] **Drive quota in profile** — Show Google Drive storage used/available in the Profile panel (GET `/drive/v3/about?fields=storageQuota`)
-- [ ] **Drive account email in profile** — Show the connected Google account email in the Profile panel (from token userinfo endpoint)
+- [x] **Loading spinner** — while cloud reconciliation runs in `_loadStoredDrawings()`
+      (`app_controller.js`), the "Sync now" button is disabled and relabeled "Checking
+      cloud…", and the status line shows "N drawing(s) loaded locally — checking cloud for
+      others…" until it completes.
+- [x] **Offline message** — `_reconcileCloud()` / `_retryPendingUploads()` now flag network
+      errors (`isNetworkError()` — offline or a `fetch` `TypeError`) via `this._cloudOffline`;
+      `_loadStoredDrawings()`'s final status becomes "N drawing(s) loaded locally (offline —
+      cloud drawings unavailable)" instead of silently showing the plain "loaded" count.
+- [x] **Drive quota in profile** — `gdrive_store.js` adds `getAccountInfo()` using Drive's own
+      `about?fields=user,storageQuota` (not the OAuth userinfo endpoint, which the
+      `drive.appdata`-only scope can't call) — `about.get` **is** covered by that scope.
+      Shown as a detail line under the Google Drive row in Profile → Cloud Storage.
+- [x] **Drive account email in profile** — same `getAccountInfo()` call above returns
+      `user.emailAddress`; shown in the same detail line, e.g. "user@gmail.com — 1.2 GB / 15
+      GB used". Best-effort — a failed fetch just omits the line, doesn't block the panel.
 - [x] **Privacy policy** — `docs/privacy.html` created (covers data collected, third-party
       services, Google Limited Use disclosure, retention/deletion, contact) and linked from
       every page footer. Admin: paste its URL

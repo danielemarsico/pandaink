@@ -16,6 +16,13 @@ import {
     isSyncTraceEnabled, setSyncTraceEnabled, getSyncTraceLog, clearSyncTraceLog,
 } from '../ble/sync.js';
 
+function formatBytes(n) {
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let i = 0, v = n;
+    while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+    return `${v.toFixed(v < 10 && i > 0 ? 1 : 0)} ${units[i]}`;
+}
+
 export class ProfilePanel {
     constructor(user, onClose, onForgetDevice) {
         this._user          = user;
@@ -234,6 +241,15 @@ export class ProfilePanel {
             catch { conn[id] = false; }
         }
 
+        // Best-effort: connected Drive account's email + storage usage. Never
+        // blocks the rest of the panel — a failure here (offline, transient
+        // API error) just means the detail line is omitted.
+        let driveInfo = null;
+        if (conn.google_drive) {
+            try { driveInfo = await cloudStore.PROVIDERS.google_drive.module.getAccountInfo(); }
+            catch { driveInfo = null; }
+        }
+
         const planTag = isPro
             ? '<span class="pp-plan pp-plan-pro">Pro</span>'
             : '<span class="pp-plan pp-plan-free">Free</span>';
@@ -253,13 +269,28 @@ export class ProfilePanel {
                 action = '<span class="pp-muted">No connect needed</span>';
             }
             const tier = p.paid ? 'Pro' : 'Free · max 10';
+
+            let detail = '';
+            if (p.id === 'google_drive' && driveInfo) {
+                const parts = [];
+                if (driveInfo.email) parts.push(driveInfo.email);
+                if (driveInfo.usage != null) {
+                    parts.push(driveInfo.limit != null
+                        ? `${formatBytes(driveInfo.usage)} / ${formatBytes(driveInfo.limit)} used`
+                        : `${formatBytes(driveInfo.usage)} used`);
+                }
+                if (parts.length) detail = `<div class="pp-provider-detail pp-muted">${parts.join(' — ')}</div>`;
+            }
+
             return `
-<label class="pp-provider-opt ${locked ? 'pp-locked' : ''}">
-  <input type="radio" name="pp-provider" value="${p.id}" ${isActive ? 'checked' : ''} ${locked ? 'disabled' : ''}>
-  <span class="pp-provider-name">${p.name}</span>
-  <span class="pp-provider-tier">${tier}</span>
-  <span class="pp-provider-action">${action}</span>
-</label>`;
+<div class="pp-provider-opt ${locked ? 'pp-locked' : ''}">
+  <label class="pp-provider-row">
+    <input type="radio" name="pp-provider" value="${p.id}" ${isActive ? 'checked' : ''} ${locked ? 'disabled' : ''}>
+    <span class="pp-provider-name">${p.name}</span>
+    <span class="pp-provider-tier">${tier}</span>
+    <span class="pp-provider-action">${action}</span>
+  </label>${detail}
+</div>`;
         };
 
         const upgrade = isPro ? '' : `

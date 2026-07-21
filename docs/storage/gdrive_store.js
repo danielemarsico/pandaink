@@ -121,3 +121,25 @@ export async function getDrawingsByDevice(deviceId) {
 export async function deleteDrawing(driveFileId) {
     await _deleteFile(driveFileId);
 }
+
+/**
+ * Connected account's email and storage usage, shown in Profile → Cloud
+ * Storage. Uses Drive's own `about` endpoint (not the OAuth userinfo
+ * endpoint) because `drive.appdata` — the only scope this app requests —
+ * doesn't grant access to userinfo, but it does grant `about.get`.
+ *
+ * @returns {Promise<{email: string|null, usage: number|null, limit: number|null}>}
+ *          usage/limit in bytes; limit is null when the account has no cap
+ *          (e.g. Google Workspace unlimited plans).
+ */
+export async function getAccountInfo() {
+    const headers = await authHeaders();
+    const res = await fetch(`${DRIVE_API}/about?fields=user,storageQuota`, { headers });
+    if (!res.ok) throw new Error(`Drive "about" request failed: ${res.status}`);
+    const { user, storageQuota } = await res.json();
+    return {
+        email: user?.emailAddress ?? null,
+        usage: storageQuota?.usage != null ? Number(storageQuota.usage) : null,
+        limit: storageQuota?.limit != null ? Number(storageQuota.limit) : null,
+    };
+}
