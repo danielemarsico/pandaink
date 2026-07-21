@@ -7,6 +7,12 @@ Format: `## Unreleased` for pending changes; `## <version> — <date>` for relea
 
 ## Unreleased
 
+- fix: `005_storage_cap.sql`'s cap-enforcement trigger rejected every free-plan cloud upload
+  (not just the 11th) with `42702 ambiguous_column` — a local variable named `owner_id`
+  collided with `storage.objects`'s own `owner_id` column under Postgres's default
+  `plpgsql.variable_conflict = error`. Renamed to `v_owner_id`. Needs re-running in the
+  Supabase SQL editor (admin task, flagged urgent in TASKS.md) since the broken version is
+  already live in production
 - fix: cloud sync silently under-reported failures — `_cmdCloudSync()` always printed "Cloud
   sync complete." after a sync pass even when individual drawing uploads failed inside it, and
   `_retryPendingUploads()` only logged those failures to the console with no visible status.

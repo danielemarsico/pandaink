@@ -9,6 +9,11 @@ These steps need external dashboards and accounts and can only be done by the pr
 Do them at your own pace; each is independent unless noted.
 
 ### Supabase
+- [ ] **URGENT — re-run `005_storage_cap.sql`** in the Supabase SQL editor. The version already
+      live in production has a bug (`42702 ambiguous_column` — a local variable named `owner_id`
+      collided with `storage.objects`'s own `owner_id` column) that currently rejects **every**
+      cloud upload for free-plan users, not just the 11th. Fixed in the migration file (renamed
+      to `v_owner_id`); `CREATE OR REPLACE FUNCTION` safely overwrites the broken one in place.
 - [ ] **Submit the Google OAuth consent screen for verification** — required to remove the
       "unverified app" warning users see when connecting Google Drive (the app requests the
       sensitive `drive.appdata` scope). Not required for Google/GitHub sign-in itself — those

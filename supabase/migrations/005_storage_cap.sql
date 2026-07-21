@@ -16,7 +16,11 @@ security definer
 set search_path = public, storage
 as $$
 declare
-  owner_id       uuid;
+  -- Prefixed with v_ to avoid colliding with storage.objects' own "owner_id"
+  -- column -- an unprefixed `owner_id` local variable is ambiguous against
+  -- that column under Postgres's default plpgsql.variable_conflict = error,
+  -- and every insert fails with "42702 column reference is ambiguous".
+  v_owner_id     uuid;
   user_plan      text;
   existing_count int;
   max_drawings   constant int := 10;  -- must match MAX_DRAWINGS in supabase_store.js
@@ -25,9 +29,9 @@ begin
     return new;
   end if;
 
-  owner_id := (storage.foldername(new.name))[1]::uuid;
+  v_owner_id := (storage.foldername(new.name))[1]::uuid;
 
-  select plan into user_plan from public.profiles where id = owner_id;
+  select plan into user_plan from public.profiles where id = v_owner_id;
   if user_plan is distinct from 'free' then
     return new;  -- pro (or missing profile) — no cap
   end if;
@@ -35,7 +39,7 @@ begin
   select count(*) into existing_count
   from storage.objects
   where bucket_id = 'drawings'
-    and (storage.foldername(name))[1] = owner_id::text
+    and (storage.foldername(name))[1] = v_owner_id::text
     and name != new.name;  -- an overwrite of the same object is not a new drawing
 
   if existing_count >= max_drawings then
