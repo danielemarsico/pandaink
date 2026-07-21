@@ -1,0 +1,25 @@
+name = "pandaink-api"
+main = "src/index.js"
+compatibility_date = "2024-11-01"
+
+# Public, non-secret variables. Set the real value to your GitHub Pages origin.
+[vars]
+ALLOWED_ORIGIN = "https://danielemarsico.github.io"
+
+# Durable Object powering live-session broadcast (one instance per session id).
+[[durable_objects.bindings]]
+name = "LIVE_SESSIONS"
+class_name = "LiveSession"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["LiveSession"]
+
+# Secrets (DO NOT put these here — set with `wrangler secret put <NAME>`):
+#   GOOGLE_CLIENT_ID
+#   GOOGLE_CLIENT_SECRET
+#   GOOGLE_REDIRECT_URI            e.g. https://danielemarsico.github.io/pandaink/app.html
+#   SUPABASE_URL                   e.g. https://qqsbcovjvhmpypzglbyq.supabase.co
+#   SUPABASE_ANON_KEY
+#   SUPABASE_SERVICE_ROLE_KEY      (Settings → API → service_role — keep secret!)
+#   KOFI_VERIFICATION_TOKEN        (Ko-fi → API/Webhooks → Verification Token)

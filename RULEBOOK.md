@@ -222,9 +222,12 @@ always on underneath — see below).
 
 | Provider | Tier | Location | Limit | Status |
 |---|---|---|---|---|
-| Supabase Storage | **Free** | app-owned Supabase project, private bucket, path `<user_id>/<timestamp>.json` | **max 10 drawings per user** | 🔵 Planned — no code yet |
-| Google Drive | **Pro (paid)** | user's own Drive, `appDataFolder` (hidden, app-private), one `drawing_<timestamp>.json` per drawing | none (user's Drive quota) | ✅ Implemented (`docs/storage/gdrive_store.js`); OAuth secret to move server-side (see Phases) |
-| Dropbox | **Pro (paid)** | user's own Dropbox, app folder | none (user's Dropbox quota) | 🔵 Planned — no code yet |
+| Supabase Storage | **Free** | app-owned Supabase project, private bucket `drawings`, path `<user_id>/<timestamp>.json` | **max 10 drawings per user** | ✅ Code done (`docs/storage/supabase_store.js`); needs migration `004_storage.sql` run |
+| Google Drive | **Pro (paid)** | user's own Drive, `appDataFolder` (hidden, app-private), one `drawing_<timestamp>.json` per drawing | none (user's Drive quota) | ✅ Code done (`docs/storage/gdrive_store.js`); token exchange routes through the Worker |
+| Dropbox | **Pro (paid)** | user's own Dropbox, app folder | none (user's Dropbox quota) | ✅ Code done (`docs/storage/dropbox_store.js`); secretless PKCE, no Worker needed |
+
+All three implement one interface behind `docs/storage/cloud_store.js`, which picks the active
+provider from `profiles.storage_provider` and gates the paid ones on `profiles.plan`.
 
 ### Tier / entitlement rules
 
@@ -256,20 +259,21 @@ Support and the paid tier both run through Ko-fi (`https://ko-fi.com/dan1elsan`)
   support section on the landing page, and a support link in the web app's Profile panel.
   Pure tips; no account effect. Mirrored in `.github/FUNDING.yml` (`ko_fi: dan1elsan`) for the
   GitHub Sponsor button.
-- **Pro upgrade** — the user buys a Ko-fi **Membership** tier (recurring) or **Shop** item
-  (one-time) named for the Pro plan. An "Upgrade to Pro" button in Profile → Cloud Storage
-  links there (built with the tier-gating UI, task S3).
-- **Automated unlock (needs the Cloudflare Worker)** — configure Ko-fi's **webhook** to POST
-  to a Worker endpoint. On each payment the Worker: (1) verifies the Ko-fi
-  `verification_token`; (2) reads the payer `email` + tier/`is_subscription_payment`; (3) finds
-  the Supabase user with that email and sets `profiles.plan = 'pro'` (service-role). For
-  recurring memberships, store the subscription state so a lapse can revert to `free`.
+- **Pro upgrade** — a **one-time $5** purchase via a Ko-fi **Shop item** grants lifetime Pro.
+  The "☕ Upgrade to Pro" button in Profile → Cloud Storage links to that Shop item
+  (`KOFI_PRO_URL` in `docs/config.js`). One-time (not recurring), so there is no lapse/renewal
+  to track — Pro stays on once granted.
+- **Automated unlock (Cloudflare Worker)** — Ko-fi's **webhook** POSTs to `POST /kofi/webhook`
+  on the Worker. The Worker: (1) verifies the Ko-fi `verification_token`; (2) reads the payer
+  `email`; (3) finds the Supabase user with that email and sets `profiles.plan = 'pro'`
+  (service-role, bypassing RLS). Implemented in `worker/src/index.js`.
   - **Email-match caveat**: Ko-fi reports the payer's Ko-fi email; unlock only works if it
-    matches the PandaInk account email. The upgrade UI must tell the user to pay with their
-    account email, and the owner keeps a manual reconciliation path for mismatches.
-- **Interim (before the Worker exists)** — no webhook yet, so the owner manually flips
-  `profiles.plan` to `pro` in Supabase after seeing a Ko-fi payment. The gating, buttons, and
-  free-tier experience still work; only the unlock step is manual until the Worker ships.
+    matches the PandaInk account email. The upgrade UI tells the user to pay with their account
+    email, and the owner keeps a manual reconciliation path for mismatches (a webhook with no
+    matching account returns 200 so Ko-fi does not retry forever).
+- **Interim (before the Worker is deployed)** — the owner manually flips `profiles.plan` to
+  `pro` in Supabase after a Ko-fi payment. Gating, buttons, and the free-tier experience all
+  work regardless; only the automatic unlock waits on the Worker deploy.
 
 ### Cloud sync model — auto background + manual
 
@@ -367,11 +371,13 @@ Division of responsibilities:
 
 - **Browser keeps everything that must touch the device**: Web Bluetooth connect, register,
   sync, and **live pen capture**. A backend can never do BLE — Web Bluetooth is browser-only.
-- **Worker takes everything that needs secrets or trust**: Google/Dropbox OAuth token
-  exchange/refresh (removes the shipped `client_secret` — supersedes both the Render plan and
-  the Google-Identity-Services approach in `.claude/plans/gdrive-secretless-auth.md`, which is
-  now unnecessary), the Supabase Storage 10-drawing cap enforcement, account deletion, and any
-  future rate limiting.
+- **Worker takes everything that needs secrets or trust**: **Google** OAuth token
+  exchange/refresh (holds the `client_secret` — supersedes both the Render plan and the
+  Google-Identity-Services approach in `.claude/plans/gdrive-secretless-auth.md`), account
+  deletion (Supabase service-role), and the **Ko-fi Pro-unlock webhook**. **Dropbox** uses
+  secretless PKCE and stays fully in the browser — no Worker endpoint. Supabase Storage cap
+  enforcement is client-side today (RLS-scoped); authoritative server-side enforcement is a
+  documented follow-up.
 - **Worker owns live-session broadcast**: a **Durable Object** per live session holds the
   WebSocket connections; the drawing user's browser publishes captured strokes to it and the
   Worker fans them out to authenticated viewers in real time. (Capture is always browser-side;
@@ -394,8 +400,11 @@ Constraints / notes:
   live broadcast need it. A Worker outage never blocks capturing or locally saving a drawing.
 - The local IndexedDB loss-protection buffer (Cloud Storage section above) remains a frontend
   responsibility.
-- Status: 🔵 Planned — no Worker code, accounts, or Cloudflare config yet. Phase 1 BLE
-  critical fixes and the Cloud Storage tasks come first; see TASKS.md.
+- Status: ✅ Worker code implemented in `worker/` (`wrangler.toml` + `src/index.js`: Google
+  token exchange/refresh, account deletion, Ko-fi webhook, `LiveSession` Durable Object).
+  Pending admin actions: create the Cloudflare account, set secrets, `wrangler deploy`, and
+  paste the Worker URL into `docs/config.js`. Until then the frontend falls back gracefully
+  (Supabase + Dropbox + local work without it). See TASKS.md → admin section.
 
 ---
 

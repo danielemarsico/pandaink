@@ -519,6 +519,29 @@ footer .footer-links {
 }
 .tab-close:hover { color: #c0392b; }
 
+/* Cloud sync badge on each drawing tab */
+.tab-badge {
+  margin-right: 0.35rem;
+  font-size: 0.8rem;
+  cursor: default;
+}
+.tab-badge.badge-synced  { color: #1a7f37; }
+.tab-badge.badge-pending { color: #d08700; }
+.tab-badge.badge-local   { color: #999; font-size: 0.6rem; vertical-align: middle; }
+
+/* Live-session sharing */
+.live-share-toggle { font-size: 0.85rem; display: inline-flex; align-items: center; gap: 0.3rem; }
+.live-share-link { margin: 0.4rem 0; font-size: 0.85rem; }
+.live-share-url {
+  width: 100%;
+  max-width: 30rem;
+  padding: 0.3rem 0.5rem;
+  font-size: 0.8rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  margin-top: 0.25rem;
+}
+
 .tab-content {
   border: 1px solid #ddd;
   border-top: none;
@@ -857,6 +880,46 @@ footer .footer-links {
 .pp-provider-icon { font-size: 1.2rem; }
 .pp-provider-name { flex: 1; }
 
+/* Tier-gated cloud storage provider picker */
+.pp-plan-line { font-size: 0.88rem; margin-bottom: 0.5rem; }
+.pp-plan {
+  display: inline-block;
+  padding: 0.05rem 0.45rem;
+  border-radius: 10px;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+.pp-plan-free { background: #eee; color: #666; }
+.pp-plan-pro  { background: #1a7f37; color: #fff; }
+
+.pp-provider-list { display: flex; flex-direction: column; gap: 0.35rem; }
+.pp-provider-opt {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  padding: 0.35rem 0.4rem;
+  border: 1px solid #e2e2e2;
+  border-radius: 5px;
+}
+.pp-provider-opt.pp-locked { opacity: 0.6; }
+.pp-provider-opt .pp-provider-name { flex: 1; font-weight: 600; }
+.pp-provider-tier { font-size: 0.72rem; color: #888; }
+.pp-provider-action { margin-left: 0.4rem; }
+
+.pp-upgrade {
+  margin-top: 0.6rem;
+  padding: 0.6rem;
+  background: #fff7f5;
+  border: 1px solid #ffd9d4;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  align-items: flex-start;
+}
+
 .pp-device-info {
   display: flex;
   flex-direction: column;
@@ -869,7 +932,7 @@ footer .footer-links {
 .pp-muted   { color: #aaa; font-size: 0.88rem; }
 .pp-error   { color: #c0392b; font-size: 0.88rem; }
 
-.pp-danger-zone { margin-top: auto; }
+.pp-danger-zone { margin-top: auto; display: flex; gap: 0.6rem; flex-wrap: wrap; }
 
 /* Diagnostics — verbose sync log */
 .pp-toggle {

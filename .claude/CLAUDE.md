@@ -173,24 +173,36 @@ Browser
   ├── docs/ui/drawing_canvas.js           — Canvas 2D rendering, orientation transforms
   ├── docs/ui/live_canvas.js              — real-time stroke rendering
   │
+  ├── docs/config.js                       — PUBLIC admin config (WORKER_BASE_URL, DROPBOX_CLIENT_ID, KOFI_PRO_URL) — no secrets
+  │
   ├── docs/ble/
   │   ├── ble_manager.js                  — Web Bluetooth API wrapper (connect/read/write/notify)
   │   ├── protocol_constants.js           — GATT UUIDs, opcodes (port of protocol.py)
   │   ├── register.js                     — BLE registration flow (PKCE-style challenge/reply)
   │   ├── sync.js                         — offline drawing sync (retrieve_data port)
-  │   └── live.js                         — live pen streaming (start_live port)
+  │   ├── live.js                         — live pen streaming (start_live port)
+  │   └── live_share.js                   — live-session WebSocket transport (host publish / viewer subscribe via Worker)
   │
   ├── docs/auth/
   │   ├── supabase_client.js              — Supabase JS singleton (SUPABASE_URL + SUPABASE_ANON_KEY)
-  │   ├── auth_manager.js                 — sign up/in/out, profile CRUD, device CRUD
-  │   └── storage_oauth.js               — Google Drive PKCE OAuth (GDRIVE_CLIENT_ID)
+  │   ├── auth_manager.js                 — sign up/in/out, profile CRUD, device CRUD, deleteAccount (via Worker), password recovery
+  │   ├── storage_oauth.js               — Google Drive OAuth; token exchange routes through the Worker when configured
+  │   └── dropbox_oauth.js               — Dropbox OAuth (secretless PKCE, browser-only)
   │
   ├── docs/storage/
-  │   ├── gdrive_store.js                 — Google Drive REST API v3 (appDataFolder); wired into app_controller.js
-  │   └── idb_store.js                    — IndexedDB CRUD — the always-on LOCAL SOURCE OF TRUTH; imported by app_controller.js (cloud is layered on top)
+  │   ├── cloud_store.js                  — provider abstraction: picks active provider from profiles.storage_provider, gates paid ones on profiles.plan
+  │   ├── gdrive_store.js                 — Google Drive REST API v3 (appDataFolder) — Pro provider
+  │   ├── dropbox_store.js                — Dropbox API (app folder) — Pro provider
+  │   ├── supabase_store.js               — Supabase Storage (private bucket) — Free provider, 10-drawing cap
+  │   └── idb_store.js                    — IndexedDB CRUD — the always-on LOCAL SOURCE OF TRUTH (cloud is layered on top)
   │
   └── docs/export/
       └── svg_export.js                   — SVG string generation + Blob download
+
+  worker/                                  — Cloudflare Worker backend (Phase 2)
+  ├── wrangler.toml                        — Worker + LiveSession Durable Object config
+  ├── src/index.js                         — Google OAuth exchange/refresh, account delete, Ko-fi webhook, live broadcast
+  └── README.md                            — deploy + secrets instructions
 
 External services:
   ├── Supabase (supabase.com)

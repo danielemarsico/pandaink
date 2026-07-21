@@ -2,11 +2,16 @@
 // Mounts as a slide-in drawer on top of the app.
 
 import {
-    getProfile, updateProfile, updatePassword, signOut, deleteDevice,
+    getProfile, updateProfile, updatePassword, signOut, deleteDevice, deleteAccount,
 } from '../auth/auth_manager.js';
 import {
-    startGDriveAuth, isDriveConnected, disconnectDrive,
+    startGDriveAuth, disconnectDrive,
 } from '../auth/storage_oauth.js';
+import {
+    startDropboxAuth, disconnectDropbox,
+} from '../auth/dropbox_oauth.js';
+import * as cloudStore from '../storage/cloud_store.js';
+import { KOFI_PRO_URL } from '../config.js';
 import {
     isSyncTraceEnabled, setSyncTraceEnabled, getSyncTraceLog, clearSyncTraceLog,
 } from '../ble/sync.js';
@@ -130,6 +135,7 @@ export class ProfilePanel {
 
   <section class="pp-section pp-danger-zone">
     <button id="pp-signout" class="btn-danger-outline">Sign out</button>
+    <button id="pp-delete-account" class="btn-danger-outline">Delete account</button>
   </section>
 </div>`;
     }
@@ -146,6 +152,7 @@ export class ProfilePanel {
             await signOut();
             this.close();
         });
+        q('#pp-delete-account')?.addEventListener('click', () => this._deleteAccount());
 
         // Diagnostics — verbose sync log
         const toggle = q('#pp-trace-toggle');
@@ -214,26 +221,101 @@ export class ProfilePanel {
     async _refreshStorage() {
         const row = this._el?.querySelector('#pp-storage-row');
         if (!row) return;
+        row.innerHTML = '<span class="pp-loading">Checking…</span>';
 
-        const connected = await isDriveConnected();
-        if (connected) {
-            row.innerHTML = `
-<div class="pp-provider-connected">
-  <span class="pp-provider-icon">📁</span>
-  <span class="pp-provider-name">Google Drive connected</span>
-  <button id="pp-disconnect-drive" class="btn-danger-outline btn-small">Disconnect</button>
-</div>`;
-            row.querySelector('#pp-disconnect-drive')
-                .addEventListener('click', () => this._disconnectDrive());
-        } else {
-            row.innerHTML = `
-<div class="pp-provider-empty">
-  <span>No storage connected</span>
-  <button id="pp-connect-drive" class="btn-primary btn-small">Connect Google Drive</button>
-</div>`;
-            row.querySelector('#pp-connect-drive')
-                .addEventListener('click', () => startGDriveAuth());
+        const profile = await cloudStore.loadProfile(this._user.id, true);
+        const isPro    = profile.plan === 'pro';
+        const active   = profile.storage_provider;
+
+        // Connection state of the OAuth providers (Supabase needs no connect).
+        const conn = {};
+        for (const id of Object.keys(cloudStore.PROVIDERS)) {
+            try { conn[id] = await cloudStore.PROVIDERS[id].isConnected(); }
+            catch { conn[id] = false; }
         }
+
+        const planTag = isPro
+            ? '<span class="pp-plan pp-plan-pro">Pro</span>'
+            : '<span class="pp-plan pp-plan-free">Free</span>';
+
+        const rowFor = (p) => {
+            const locked   = p.paid && !isPro;
+            const isActive = active === p.id;
+            const connected = conn[p.id];
+            let action = '';
+            if (locked) {
+                action = '<span class="pp-muted">🔒 Pro</span>';
+            } else if (p.needsOAuth) {
+                action = connected
+                    ? `<button data-disc="${p.id}" class="btn-danger-outline btn-small">Disconnect</button>`
+                    : `<button data-conn="${p.id}" class="btn-small">Connect</button>`;
+            } else {
+                action = '<span class="pp-muted">No connect needed</span>';
+            }
+            const tier = p.paid ? 'Pro' : 'Free · max 10';
+            return `
+<label class="pp-provider-opt ${locked ? 'pp-locked' : ''}">
+  <input type="radio" name="pp-provider" value="${p.id}" ${isActive ? 'checked' : ''} ${locked ? 'disabled' : ''}>
+  <span class="pp-provider-name">${p.name}</span>
+  <span class="pp-provider-tier">${tier}</span>
+  <span class="pp-provider-action">${action}</span>
+</label>`;
+        };
+
+        const upgrade = isPro ? '' : `
+<div class="pp-upgrade">
+  <span>Unlock Google Drive &amp; Dropbox with Pro — one-time $5.</span>
+  ${KOFI_PRO_URL
+      ? `<a class="btn-kofi btn-small" href="${KOFI_PRO_URL}" target="_blank" rel="noopener" style="text-decoration:none;display:inline-block;">☕ Upgrade to Pro</a>`
+      : '<span class="pp-muted">(upgrade link not set up yet)</span>'}
+</div>`;
+
+        row.innerHTML = `
+<div class="pp-plan-line">Plan: ${planTag}</div>
+<div class="pp-provider-list">
+  ${rowFor(cloudStore.PROVIDERS.supabase)}
+  ${rowFor(cloudStore.PROVIDERS.google_drive)}
+  ${rowFor(cloudStore.PROVIDERS.dropbox)}
+</div>
+${upgrade}
+<p class="pp-muted pp-hint">One provider is active at a time. Switching does not move existing
+   drawings; the list shows the active provider's cloud drawings plus everything on this device.</p>`;
+
+        // Wire selection + connect/disconnect.
+        row.querySelectorAll('input[name="pp-provider"]').forEach((radio) => {
+            radio.addEventListener('change', () => this._selectProvider(radio.value));
+        });
+        row.querySelectorAll('[data-conn]').forEach((b) =>
+            b.addEventListener('click', () => this._connectProvider(b.dataset.conn)));
+        row.querySelectorAll('[data-disc]').forEach((b) =>
+            b.addEventListener('click', () => this._disconnectProvider(b.dataset.disc)));
+    }
+
+    async _selectProvider(id) {
+        try {
+            await cloudStore.setProvider(this._user.id, id);
+            this._showMsg('pp-storage-msg', `Storage provider set to ${cloudStore.PROVIDERS[id].name}.`, false);
+        } catch (e) {
+            this._showMsg('pp-storage-msg', e.message, true);
+        }
+        await this._refreshStorage();
+    }
+
+    async _connectProvider(id) {
+        // Make it the active provider first, then start its OAuth flow (a redirect).
+        try { await cloudStore.setProvider(this._user.id, id); } catch (e) {
+            this._showMsg('pp-storage-msg', e.message, true); return;
+        }
+        if (id === 'google_drive') return startGDriveAuth();
+        if (id === 'dropbox')      return startDropboxAuth();
+    }
+
+    async _disconnectProvider(id) {
+        if (!confirm('Disconnect this provider? You will lose access to its cloud drawings until you reconnect.')) return;
+        if (id === 'google_drive') await disconnectDrive();
+        if (id === 'dropbox')      await disconnectDropbox();
+        this._showMsg('pp-storage-msg', 'Provider disconnected.', false);
+        await this._refreshStorage();
     }
 
     async _refreshDevice() {
@@ -280,11 +362,15 @@ export class ProfilePanel {
             this._el.querySelector('#pp-password').value = '';
     }
 
-    async _disconnectDrive() {
-        if (!confirm('Disconnect Google Drive? You will lose access to cloud drawings.')) return;
-        await disconnectDrive();
-        this._showMsg('pp-storage-msg', 'Google Drive disconnected.', false);
-        await this._refreshStorage();
+    async _deleteAccount() {
+        if (!confirm('Permanently delete your PandaInk account? This removes your profile, device registration and cloud tokens. This cannot be undone.')) return;
+        this._showMsg('pp-account-msg', 'Deleting account…', false);
+        const { error } = await deleteAccount();
+        if (error) {
+            this._showMsg('pp-account-msg', 'Error: ' + error.message, true);
+            return;
+        }
+        this.close();  // signed out by deleteAccount(); auth state change re-renders login
     }
 
     async _forgetDevice() {
