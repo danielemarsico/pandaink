@@ -151,6 +151,26 @@ async function kofiWebhook(req, env) {
     const email = (payload.email || '').trim().toLowerCase();
     if (!email) return text('No email in payload', env, 400);
 
+    const txId = payload.kofi_transaction_id;
+    if (!txId) return text('No kofi_transaction_id in payload', env, 400);
+
+    // Claim this transaction id first, via an atomic insert against a unique
+    // primary key -- this is what actually stops replay: KOFI_VERIFICATION_TOKEN
+    // is a single static secret (not a per-request signature), so anyone who
+    // ever obtains it could otherwise forge unlimited "payments". A 409 here
+    // means this transaction was already processed (Ko-fi's own retry, a
+    // replayed capture, or a forged request reusing an old id) -- accept the
+    // webhook (200) so Ko-fi doesn't keep retrying, but grant nothing more.
+    const claim = await supabaseAdmin(env, '/rest/v1/kofi_events', {
+        method: 'POST',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify({ kofi_transaction_id: txId, email }),
+    });
+    if (claim.status === 409) {
+        return json({ ok: true, duplicate: true }, env);
+    }
+    if (!claim.ok) return text('Transaction claim failed: ' + await claim.text(), env, 500);
+
     // Find the Supabase user with this email.
     const listRes = await supabaseAdmin(env, `/auth/v1/admin/users?email=${encodeURIComponent(email)}`);
     if (!listRes.ok) return text('User lookup failed', env, 500);

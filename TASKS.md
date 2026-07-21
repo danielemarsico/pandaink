@@ -14,6 +14,10 @@ Do them at your own pace; each is independent unless noted.
       collided with `storage.objects`'s own `owner_id` column) that currently rejects **every**
       cloud upload for free-plan users, not just the 11th. Fixed in the migration file (renamed
       to `v_owner_id`); `CREATE OR REPLACE FUNCTION` safely overwrites the broken one in place.
+- [ ] **URGENT — run `006_kofi_events.sql`** in the Supabase SQL editor. The Worker was just
+      deployed with code that requires the new `kofi_events` table (Ko-fi transaction-id replay
+      guard) — until this migration runs, **every real Ko-fi webhook call will fail with a 500**
+      (confirmed: the table doesn't exist yet in production as of this deploy).
 - [ ] **Submit the Google OAuth consent screen for verification** — required to remove the
       "unverified app" warning users see when connecting Google Drive (the app requests the
       sensitive `drive.appdata` scope). Not required for Google/GitHub sign-in itself — those

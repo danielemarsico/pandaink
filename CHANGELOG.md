@@ -7,6 +7,14 @@ Format: `## Unreleased` for pending changes; `## <version> — <date>` for relea
 
 ## Unreleased
 
+- feat: add replay/forgery protection to the Ko-fi Pro-unlock webhook — `KOFI_VERIFICATION_TOKEN`
+  is a static shared secret, not a per-request signature, so anyone who obtained it could forge
+  unlimited fake "payments". New migration `006_kofi_events.sql` (`kofi_events` table, unique
+  `kofi_transaction_id`) plus a Worker change that atomically claims each transaction id before
+  granting Pro; an already-seen id (a genuine Ko-fi retry, a replayed capture, or a forged request
+  reusing an old id) is now a no-op instead of re-granting. Deployed to the Worker — **migration
+  006 must be run before any real purchase**, or the webhook will 500 until then (flagged urgent
+  in TASKS.md)
 - feat: export drawings as PNG and PDF in addition to SVG, in both the desktop GUI and the web app.
   Desktop tabs now have an `Export ▾` menu (Save as SVG… / PNG… / PDF…); web tabs gained Save PNG and
   Save PDF buttons. PNG is a transparent raster, PDF is a single white page. No new dependencies (desktop

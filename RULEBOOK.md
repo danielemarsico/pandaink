@@ -270,13 +270,23 @@ Support and the paid tier both run through Ko-fi (`https://ko-fi.com/dan1elsan`)
   (`KOFI_PRO_URL` in `docs/config.js`). One-time (not recurring), so there is no lapse/renewal
   to track — Pro stays on once granted.
 - **Automated unlock (Cloudflare Worker)** — Ko-fi's **webhook** POSTs to `POST /kofi/webhook`
-  on the Worker. The Worker: (1) verifies the Ko-fi `verification_token`; (2) reads the payer
-  `email`; (3) finds the Supabase user with that email and sets `profiles.plan = 'pro'`
-  (service-role, bypassing RLS). Implemented in `worker/src/index.js`.
+  on the Worker. The Worker: (1) verifies the Ko-fi `verification_token`; (2) claims the payload's
+  `kofi_transaction_id` (see "Replay protection" below); (3) reads the payer `email`; (4) finds
+  the Supabase user with that email and sets `profiles.plan = 'pro'` (service-role, bypassing
+  RLS). Implemented in `worker/src/index.js`.
   - **Email-match caveat**: Ko-fi reports the payer's Ko-fi email; unlock only works if it
     matches the PandaInk account email. The upgrade UI tells the user to pay with their account
     email, and the owner keeps a manual reconciliation path for mismatches (a webhook with no
-    matching account returns 200 so Ko-fi does not retry forever).
+    matching account returns 200 so Ko-fi does not retry forever) — see README.md "Ko-fi Pro
+    unlock (admin)". A buyer whose webhook fails outright (e.g. a transient network error between
+    Ko-fi and the Worker) has no way to retrigger it themselves; the same manual path covers that
+    too — they email the owner, who confirms the purchase in the Ko-fi dashboard and grants Pro.
+  - **Replay protection**: `KOFI_VERIFICATION_TOKEN` is a single static secret, not a per-request
+    signature, so anyone who obtained it could otherwise forge unlimited fake "payments". Migration
+    `006_kofi_events.sql` adds a `kofi_events` table (`kofi_transaction_id` primary key); the Worker
+    atomically inserts the incoming transaction id before granting anything, and a unique-constraint
+    conflict (already processed — a genuine Ko-fi retry, a replayed capture, or a forged request
+    reusing an old id) makes it a no-op that still returns 200 (so Ko-fi doesn't keep retrying).
 - **Interim (before the Worker is deployed)** — the owner manually flips `profiles.plan` to
   `pro` in Supabase after a Ko-fi payment. Gating, buttons, and the free-tier experience all
   work regardless; only the automatic unlock waits on the Worker deploy.
