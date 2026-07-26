@@ -701,6 +701,10 @@ class TuhiGUIApp(tk.Tk):
                 with open(path, 'wb') as f:
                     f.write(data)
                 self._set_status(f'Saved: {os.path.basename(path)}')
+                messagebox.showinfo(
+                    'Export complete',
+                    f'Drawing exported as {fmt}:\n{path}',
+                    parent=self)
             except Exception as e:
                 messagebox.showerror('Export failed', str(e))
 
@@ -713,6 +717,10 @@ class TuhiGUIApp(tk.Tk):
                     provider_fn(svg_data, default_svg_name, **kwargs)
                     self.after(0, lambda: self._set_status(
                         f'Uploaded to {provider_name}: {default_svg_name}'))
+                    self.after(0, lambda: messagebox.showinfo(
+                        'Export complete',
+                        f'Drawing uploaded to {provider_name}:\n{default_svg_name}',
+                        parent=self))
                 except Exception as e:
                     self.after(0, lambda: messagebox.showerror(
                         f'{provider_name} export failed', str(e)))

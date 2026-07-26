@@ -868,7 +868,9 @@ export class AppController {
         const svgBtn = document.createElement('button');
         svgBtn.textContent = 'Save SVG';
         svgBtn.addEventListener('click', () => {
-            downloadSvg(drawingToSvg(drawing, this._orientation), `${baseName()}.svg`);
+            const fileName = `${baseName()}.svg`;
+            downloadSvg(drawingToSvg(drawing, this._orientation), fileName);
+            alert(`Exported as ${fileName}`);
         });
 
         const pngBtn = document.createElement('button');
@@ -876,8 +878,10 @@ export class AppController {
         pngBtn.addEventListener('click', async () => {
             pngBtn.disabled = true;
             try {
+                const fileName = `${baseName()}.png`;
                 const blob = await drawingToPngBlob(drawing, this._orientation);
-                downloadBlob(blob, `${baseName()}.png`);
+                downloadBlob(blob, fileName);
+                alert(`Exported as ${fileName}`);
             } catch (e) {
                 alert('PNG export failed: ' + (e && e.message ? e.message : e));
             } finally {
@@ -890,8 +894,10 @@ export class AppController {
         pdfBtn.addEventListener('click', async () => {
             pdfBtn.disabled = true;
             try {
+                const fileName = `${baseName()}.pdf`;
                 const blob = await drawingToPdfBlob(drawing, this._orientation);
-                downloadBlob(blob, `${baseName()}.pdf`);
+                downloadBlob(blob, fileName);
+                alert(`Exported as ${fileName}`);
             } catch (e) {
                 alert('PDF export failed: ' + (e && e.message ? e.message : e));
             } finally {

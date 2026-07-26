@@ -7,6 +7,10 @@ Format: `## Unreleased` for pending changes; `## <version> — <date>` for relea
 
 ## Unreleased
 
+- feat: show a confirmation after a drawing is exported — the desktop GUI pops an "Export
+  complete" message box (for SVG/PNG/PDF saves and cloud uploads) and the web app shows an
+  "Exported as <filename>" alert after each SVG/PNG/PDF download, so it's clear the export
+  succeeded.
 - feat: drawing management — **rename**, **merge**, and **automerge** — in both the desktop GUI
   and the web app. Rename gives a drawing a custom label shown on its tab (instead of the
   timestamp) and used as the default export filename; the timestamp identity/filename is
