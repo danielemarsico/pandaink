@@ -52,6 +52,9 @@ export class AppController {
         this._viewer      = null;   // active viewer subscription, when watching
         this._drawings    = [];
         this._cloudOn     = false;   // active provider connected? (for tab badges)
+        this._selectMode  = false;   // merge-selection mode active?
+        this._selected    = new Set();   // selected drawing timestamps (stable key)
+        this._automerge   = localStorage.getItem('pandaink.automerge') === '1';
         this._activeDrawingIndex = -1;
         this._liveCanvas  = null;
         this._profilePanel = null;
@@ -296,6 +299,12 @@ export class AppController {
     <button id="btn-sync" disabled>Sync drawings</button>
     <button id="btn-cloud-sync" style="display:none">Sync now (cloud)</button>
     <button id="btn-forget" style="display:none">Forget device</button>
+    <span class="action-bar-sep"></span>
+    <button id="btn-select">Select</button>
+    <button id="btn-merge" style="display:none">Merge</button>
+    <label class="automerge-toggle" title="Save all new drawings into one canvas">
+      <input type="checkbox" id="automerge"> Automerge
+    </label>
   </div>
   <div id="status-bar" class="status-bar">Not connected</div>
   <div id="drawing-tabs" class="drawing-tabs">
@@ -344,6 +353,12 @@ export class AppController {
         r('#btn-cloud-sync').addEventListener('click', () => this._cmdCloudSync());
         r('#btn-forget').addEventListener('click',  () => this._cmdForget());
         r('#btn-start-live').addEventListener('click', () => this._cmdToggleLive());
+        r('#btn-select').addEventListener('click',  () => this._toggleSelectMode());
+        r('#btn-merge').addEventListener('click',   () => this._cmdMerge());
+
+        const automergeEl = r('#automerge');
+        automergeEl.checked = this._automerge;
+        automergeEl.addEventListener('change', (e) => this._setAutomerge(e.target.checked));
 
         this._root.querySelectorAll('input[name="mode"]').forEach((radio) => {
             radio.addEventListener('change', (e) => this._setMode(e.target.value));
@@ -512,24 +527,17 @@ export class AppController {
                         strokes:     d.strokes,
                         uploaded:    false,
                         driveFileId: null,
+                        name:        null,
                     };
-                    const id = await localStore.saveDrawing(record);
+                    // Automerge folds strokes into one canvas; otherwise each
+                    // drawing is its own record. Local save always happens first
+                    // (before the device deletes the file), then cloud upload.
+                    const res = await this._persistSyncedDrawing(record, cloudOn);
                     saved++;
                     this._setStatus(`Saved ${saved} drawing(s)…`);
-
                     if (cloudOn) {
-                        try {
-                            const up = await cloudStore.saveDrawing(this._user.id, record);
-                            await localStore.updateDrawing({
-                                ...record, id, uploaded: true, driveFileId: up.driveFileId,
-                            });
-                            uploaded++;
-                        } catch (e) {
-                            // Local copy is safe; leave it pending for a later retry.
-                            if (e.code === 'CAP_REACHED') capHit = true;
-                            console.warn('Cloud upload failed, kept locally:', e);
-                            pending++;
-                        }
+                        if (res.uploaded) uploaded++; else pending++;
+                        if (res.capHit) capHit = true;
                     }
                 },
             });
@@ -554,6 +562,74 @@ export class AppController {
         } finally {
             btn.disabled = false;
         }
+    }
+
+    // ── Automerge ──────────────────────────────────────────────────────────────
+
+    _automergeKey() { return `pandaink.automergeTarget.${this._deviceInfo?.id}`; }
+
+    _getAutomergeTarget() {
+        const v = localStorage.getItem(this._automergeKey());
+        return v ? Number(v) : null;
+    }
+
+    _setAutomergeTarget(id) {
+        if (id == null) localStorage.removeItem(this._automergeKey());
+        else localStorage.setItem(this._automergeKey(), String(id));
+    }
+
+    _setAutomerge(on) {
+        this._automerge = on;
+        localStorage.setItem('pandaink.automerge', on ? '1' : '0');
+        // Starting (or stopping) automerge begins a fresh merged canvas: forget
+        // the current target so the next synced drawing starts a new record.
+        this._setAutomergeTarget(null);
+        this._setStatus(on
+            ? 'Automerge on — new drawings append to one canvas.'
+            : 'Automerge off — new drawings save separately.');
+    }
+
+    // Persist one freshly-synced drawing. With automerge on, its strokes are
+    // appended to the current target record (created lazily from the first
+    // drawing after the switch is enabled); otherwise it becomes its own record.
+    // Returns { uploaded, pending, capHit } describing the cloud outcome.
+    async _persistSyncedDrawing(record, cloudOn) {
+        const out = { uploaded: false, pending: false, capHit: false };
+
+        let target = null;
+        if (this._automerge) {
+            const targetId = this._getAutomergeTarget();
+            if (targetId != null) {
+                const existing = await localStore.getDrawing(targetId);
+                if (existing && existing.deviceId === record.deviceId) target = existing;
+            }
+        }
+
+        let toUpload;
+        if (target) {
+            target.strokes  = target.strokes.concat(record.strokes);
+            target.uploaded = false;   // strokes changed — cloud copy is now stale
+            await localStore.updateDrawing(target);
+            toUpload = target;
+        } else {
+            const id = await localStore.saveDrawing(record);
+            record.id = id;
+            if (this._automerge) this._setAutomergeTarget(id);
+            toUpload = record;
+        }
+
+        if (cloudOn) {
+            try {
+                const up = await cloudStore.saveDrawing(this._user.id, toUpload);
+                await localStore.updateDrawing({ ...toUpload, uploaded: true, driveFileId: up.driveFileId });
+                out.uploaded = true;
+            } catch (e) {
+                if (e.code === 'CAP_REACHED') out.capHit = true;
+                console.warn('Cloud upload failed, kept locally:', e);
+                out.pending = true;
+            }
+        }
+        return out;
     }
 
     // ── Drawing tabs ─────────────────────────────────────────────────────────
@@ -714,10 +790,24 @@ export class AppController {
         }
 
         this._drawings.forEach((d, idx) => {
-            const ts  = new Date(d.timestamp * 1000).toLocaleString();
             const tab = document.createElement('div');
             tab.className   = 'tab-btn';
             tab.dataset.idx = idx;
+
+            // Merge-selection checkbox — only shown while in Select mode.
+            if (this._selectMode) {
+                const check = document.createElement('input');
+                check.type    = 'checkbox';
+                check.className = 'tab-check';
+                check.checked = this._selected.has(d.timestamp);
+                check.title   = 'Select for merge';
+                check.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    if (check.checked) this._selected.add(d.timestamp);
+                    else               this._selected.delete(d.timestamp);
+                });
+                tab.appendChild(check);
+            }
 
             // Selecting and closing are separate targets: a single button whose
             // whole label ended with "×" made every tap close the tab.
@@ -729,7 +819,7 @@ export class AppController {
 
             const label = document.createElement('span');
             label.className   = 'tab-label';
-            label.textContent = ts;
+            label.textContent = this._drawingLabel(d);
             label.addEventListener('click', () => this._selectTab(idx));
 
             const close = document.createElement('span');
@@ -750,6 +840,12 @@ export class AppController {
         this._selectTab(0);
     }
 
+    // A drawing's display label: its user-set name, or a formatted timestamp.
+    _drawingLabel(d) {
+        if (d.name && d.name.trim()) return d.name;
+        return new Date(d.timestamp * 1000).toLocaleString();
+    }
+
     // Cloud sync badge for a drawing tab.
     _badgeFor(d) {
         if (d.uploaded)     return { icon: '☁✓', cls: 'badge-synced',  title: 'Synced to cloud' };
@@ -767,12 +863,14 @@ export class AppController {
         toolbar.className = 'tab-toolbar';
 
         const baseName = () =>
-            `drawing_${new Date(drawing.timestamp * 1000).toLocaleString().replace(/[/:]/g, '-')}`;
+            `drawing_${this._drawingLabel(drawing).replace(/[/:\\?%*|"<>]/g, '-')}`;
 
         const svgBtn = document.createElement('button');
         svgBtn.textContent = 'Save SVG';
         svgBtn.addEventListener('click', () => {
-            downloadSvg(drawingToSvg(drawing, this._orientation), `${baseName()}.svg`);
+            const fileName = `${baseName()}.svg`;
+            downloadSvg(drawingToSvg(drawing, this._orientation), fileName);
+            alert(`Exported as ${fileName}`);
         });
 
         const pngBtn = document.createElement('button');
@@ -780,8 +878,10 @@ export class AppController {
         pngBtn.addEventListener('click', async () => {
             pngBtn.disabled = true;
             try {
+                const fileName = `${baseName()}.png`;
                 const blob = await drawingToPngBlob(drawing, this._orientation);
-                downloadBlob(blob, `${baseName()}.png`);
+                downloadBlob(blob, fileName);
+                alert(`Exported as ${fileName}`);
             } catch (e) {
                 alert('PNG export failed: ' + (e && e.message ? e.message : e));
             } finally {
@@ -794,14 +894,20 @@ export class AppController {
         pdfBtn.addEventListener('click', async () => {
             pdfBtn.disabled = true;
             try {
+                const fileName = `${baseName()}.pdf`;
                 const blob = await drawingToPdfBlob(drawing, this._orientation);
-                downloadBlob(blob, `${baseName()}.pdf`);
+                downloadBlob(blob, fileName);
+                alert(`Exported as ${fileName}`);
             } catch (e) {
                 alert('PDF export failed: ' + (e && e.message ? e.message : e));
             } finally {
                 pdfBtn.disabled = false;
             }
         });
+
+        const renameBtn = document.createElement('button');
+        renameBtn.textContent = 'Rename';
+        renameBtn.addEventListener('click', () => this._renameDrawing(idx));
 
         const delBtn = document.createElement('button');
         delBtn.textContent = 'Delete';
@@ -810,6 +916,7 @@ export class AppController {
         toolbar.appendChild(svgBtn);
         toolbar.appendChild(pngBtn);
         toolbar.appendChild(pdfBtn);
+        toolbar.appendChild(renameBtn);
         toolbar.appendChild(delBtn);
         content.appendChild(toolbar);
 
@@ -854,6 +961,111 @@ export class AppController {
     _rerenderActiveDrawing() {
         if (this._activeDrawingCanvas) {
             this._activeDrawingCanvas.setOrientation(this._orientation);
+        }
+    }
+
+    // ── Rename ─────────────────────────────────────────────────────────────────
+
+    async _renameDrawing(idx) {
+        const drawing = this._drawings[idx];
+        const current = drawing.name ?? '';
+        const input = prompt('New name (leave blank to use the timestamp):', current);
+        if (input === null) return;   // cancelled
+        const name = input.trim() || null;
+        try {
+            drawing.name = name;
+            await localStore.updateDrawing(drawing);
+            // Keep the cloud copy in sync (best-effort) so the name follows the
+            // drawing across devices.
+            if (drawing.driveFileId && await this._isCloudOn()) {
+                try {
+                    const up = await cloudStore.saveDrawing(this._user.id, drawing);
+                    await localStore.updateDrawing({ ...drawing, driveFileId: up.driveFileId });
+                } catch (e) {
+                    console.warn('Cloud rename sync failed (local name saved):', e);
+                }
+            }
+            this._renderDrawingList();
+            this._selectTab(idx);
+            this._setStatus(`Renamed to "${this._drawingLabel(drawing)}".`);
+        } catch (e) {
+            this._setStatus('Rename failed: ' + e.message);
+        }
+    }
+
+    // ── Merge selection ────────────────────────────────────────────────────────
+
+    _toggleSelectMode() {
+        this._selectMode = !this._selectMode;
+        if (!this._selectMode) this._selected.clear();
+        this._root.querySelector('#btn-select').textContent = this._selectMode ? 'Cancel' : 'Select';
+        this._root.querySelector('#btn-merge').style.display = this._selectMode ? '' : 'none';
+        this._renderDrawingList();
+        if (this._selectMode) this._setStatus('Select drawings to merge, then click Merge.');
+    }
+
+    async _cmdMerge() {
+        const selected = this._drawings
+            .filter((d) => this._selected.has(d.timestamp))
+            .sort((a, b) => a.timestamp - b.timestamp);
+
+        if (selected.length < 2) {
+            alert('Select at least two drawings to merge.');
+            return;
+        }
+        if (!confirm(
+                `Merge ${selected.length} drawings into a single drawing?\n\n` +
+                'The originals will be permanently deleted. This cannot be undone.')) {
+            return;
+        }
+
+        try {
+            // Fresh, non-colliding timestamp for the merged drawing.
+            const existing = new Set(this._drawings.map((d) => d.timestamp));
+            let newTs = Math.floor(Date.now() / 1000);
+            while (existing.has(newTs)) newTs++;
+
+            const merged = {
+                deviceId:    this._deviceInfo.id,
+                timestamp:   newTs,
+                dimensions:  selected[0].dimensions,
+                strokes:     selected.flatMap((d) => d.strokes),
+                uploaded:    false,
+                driveFileId: null,
+                name:        null,
+            };
+
+            const id = await localStore.saveDrawing(merged);
+            merged.id = id;
+
+            const cloudOn = await this._isCloudOn();
+            if (cloudOn) {
+                try {
+                    const up = await cloudStore.saveDrawing(this._user.id, merged);
+                    await localStore.updateDrawing({ ...merged, uploaded: true, driveFileId: up.driveFileId });
+                } catch (e) {
+                    console.warn('Cloud upload of merged drawing failed (kept locally):', e);
+                }
+            }
+
+            // Delete the originals (local + cloud) now the merged copy is saved.
+            for (const d of selected) {
+                if (d.id != null) await localStore.deleteDrawing(d.id);
+                if (d.driveFileId && cloudOn) {
+                    try { await cloudStore.deleteDrawing(this._user.id, d.driveFileId); }
+                    catch (e) { console.warn('Cloud delete failed during merge:', e); }
+                }
+                if (this._getAutomergeTarget() === d.id) this._setAutomergeTarget(null);
+            }
+
+            this._selectMode = false;
+            this._selected.clear();
+            this._root.querySelector('#btn-select').textContent = 'Select';
+            this._root.querySelector('#btn-merge').style.display = 'none';
+            await this._loadStoredDrawings();
+            this._setStatus(`Merged ${selected.length} drawings into one.`);
+        } catch (e) {
+            this._setStatus('Merge failed: ' + e.message);
         }
     }
 

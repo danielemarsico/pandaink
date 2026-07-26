@@ -7,6 +7,24 @@ Format: `## Unreleased` for pending changes; `## <version> — <date>` for relea
 
 ## Unreleased
 
+- feat: add a Contact page (`docs/contact.html`) with a runtime-assembled (base64-decoded)
+  email address so it isn't scrapable from the page source, plus an "Open an issue on GitHub"
+  button; linked from every page footer. Removed the plaintext `mailto:` addresses that were
+  exposed in `privacy.html` and `thanks.html` (they now point to the Contact page).
+- feat: show a confirmation after a drawing is exported — the desktop GUI pops an "Export
+  complete" message box (for SVG/PNG/PDF saves and cloud uploads) and the web app shows an
+  "Exported as <filename>" alert after each SVG/PNG/PDF download, so it's clear the export
+  succeeded.
+- feat: drawing management — **rename**, **merge**, and **automerge** — in both the desktop GUI
+  and the web app. Rename gives a drawing a custom label shown on its tab (instead of the
+  timestamp) and used as the default export filename; the timestamp identity/filename is
+  unchanged. Merge adds a `Select` mode with a checkbox per drawing and a `Merge` button that
+  concatenates the chosen drawings' strokes into one new drawing and permanently deletes the
+  originals (irreversible, confirmed first) — locally and in the cloud when connected. Automerge
+  is a switch that, while on, appends every newly synced (and, on desktop, live-saved) drawing
+  into a single canvas instead of a new file; toggling it starts a fresh merged canvas. Desktop
+  stores the label as `title` in the drawing JSON and the automerge state in a new
+  `app_settings.ini`; web stores it as `name` on the record and the switch in `localStorage`.
 - feat: add replay/forgery protection to the Ko-fi Pro-unlock webhook — `KOFI_VERIFICATION_TOKEN`
   is a static shared secret, not a per-request signature, so anyone who obtained it could forge
   unlimited fake "payments". New migration `006_kofi_events.sql` (`kofi_events` table, unique

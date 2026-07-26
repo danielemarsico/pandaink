@@ -476,6 +476,39 @@ Shared implementation notes:
   disable themselves while rendering. Default filename is `drawing_<timestamp>.<ext>`.
 - **Cloud upload** (desktop Google Drive / Dropbox / OneDrive) still uploads **SVG** only.
 
+### Drawing management — rename, merge, automerge
+
+Three drawing-organisation features, implemented identically in the **desktop GUI**
+(`src/tuhi_gui.py` + `src/tuhi/config_win.py`) and the **web app** (`docs/ui/app_controller.js`
++ `docs/storage/idb_store.js` and the cloud stores). Drawings keep a per-drawing user
+label alongside their timestamp identity.
+
+- **Rename.** Drawings are identified by their creation timestamp, but each drawing now
+  also carries an optional user-set label (`title` in the desktop JSON, `name` in the web
+  record). A `Rename` button in each drawing's toolbar prompts for a name; when set, the
+  tab shows the name instead of the timestamp, and it becomes the default export filename.
+  Clearing the name reverts to the timestamp. The timestamp (and the on-disk / cloud file
+  name) never changes — rename only edits the label. Web renames also re-upload the record
+  so the name follows the drawing across devices (best-effort).
+
+- **Merge.** A `Select` toggle in the action bar enters selection mode: a checkbox appears
+  for each drawing. The user ticks two or more, clicks `Merge`, and confirms a warning that
+  the operation is **irreversible**. The selected drawings' strokes are concatenated (in
+  timestamp order) into a single **new** drawing (fresh, non-colliding timestamp; dimensions
+  taken from the first selected drawing) and the **originals are permanently deleted** —
+  locally and, when a cloud provider is connected, in the cloud too.
+
+- **Automerge.** A switch in the action bar (persisted: `[App] Automerge` in
+  `app_settings.ini` on desktop; `localStorage['pandaink.automerge']` on web). While **on**,
+  every newly saved drawing — offline sync on both platforms, plus live-session save on
+  desktop — has its strokes **appended to a single "target" canvas** instead of creating a
+  new file. The first drawing after the switch is enabled becomes the target; each later one
+  appends to it (the cloud copy is overwritten in place, keyed by the target's timestamp).
+  While **off**, every new drawing is saved to its own file as before. Toggling the switch
+  (either direction) **resets the target**, so a fresh merged canvas starts each time
+  automerge is enabled. The target id/timestamp is tracked per device (desktop: `[Automerge]`
+  section keyed by BT address; web: `localStorage['pandaink.automergeTarget.<deviceId>']`).
+
 ### Live-session sharing (planned)
 
 Real-time spectating of a live drawing session. The drawing user's browser captures pen data
