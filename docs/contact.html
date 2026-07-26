@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Contact — PandaInk</title>
+  <meta name="description" content="Get in touch with the PandaInk project — email the maintainer or open an issue on GitHub.">
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+</head>
+<body>
+
+  <!-- Navigation -->
+  <nav>
+    <div class="container">
+      <a class="nav-brand" href="index.html">PandaInk</a>
+      <ul class="nav-links">
+        <li><a href="index.html">Home</a></li>
+        <li><a href="features.html">Features</a></li>
+        <li><a href="download.html">Download</a></li>
+        <li><a href="app.html">Web App</a></li>
+        <li><a href="https://github.com/danielemarsico/pandaink" target="_blank" rel="noopener">GitHub</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <main>
+
+    <!-- Page header -->
+    <section style="padding-bottom:1.5rem;">
+      <div class="container">
+        <h1>Contact</h1>
+        <p>
+          Questions, bug reports, feature ideas, or anything about your data — here's how to
+          reach the project. You're welcome to use whichever suits you.
+        </p>
+
+        <h2>Email</h2>
+        <p>
+          For private questions (e.g. about your account or data), email the maintainer directly.
+          The address is assembled in your browser, so it isn't sitting in the page source for
+          spam bots to harvest.
+        </p>
+        <p>
+          <!-- The address is NOT in the page source; it is decoded at runtime by the script
+               at the bottom of the page. With JavaScript off, the GitHub option below still works. -->
+          <a id="contact-email" class="btn btn-outline" href="#" hidden>Show email address</a>
+          <span id="contact-email-fallback" class="pp-muted">
+            Enable JavaScript to reveal the email address, or use GitHub below.
+          </span>
+        </p>
+
+        <h2>GitHub</h2>
+        <p>
+          For bugs, feature requests, and public questions, open an issue on GitHub. This is the
+          best place for anything others might benefit from seeing (it's public and searchable).
+          A GitHub account is required.
+        </p>
+        <p>
+          <a class="btn btn-primary"
+             href="https://github.com/danielemarsico/pandaink/issues/new"
+             target="_blank" rel="noopener">Open an issue on GitHub</a>
+        </p>
+
+        <p class="pp-muted" style="margin-top:1.5rem;">
+          This is a small open-source project maintained in spare time — replies may take a little
+          while. Thanks for your patience!
+        </p>
+      </div>
+    </section>
+  </main>
+
+  <!-- Footer -->
+  <footer>
+    <div class="container">
+      <div>Released under the <strong>GPLv2</strong> license.</div>
+      <div class="footer-links">
+        <span>Based on <a href="https://github.com/tuhiproject/tuhi" target="_blank" rel="noopener">Tuhi</a></span>
+        <span><a href="https://github.com/danielemarsico/pandaink" target="_blank" rel="noopener">GitHub</a></span>
+        <span><a href="contact.html">Contact</a></span>
+        <span><a href="privacy.html">Privacy</a></span>
+        <span><a class="kofi-link" href="https://ko-fi.com/dan1elsan" target="_blank" rel="noopener">☕ Support on Ko-fi</a></span>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    // Assemble the contact address at runtime from a base64 blob so the plain
+    // "user@domain" string never appears in the page source (defeats the naive
+    // text/regex scrapers that harvest mailto addresses). Determined,
+    // JS-executing scrapers can still read it — full concealment needs a form.
+    (function () {
+      var link = document.getElementById('contact-email');
+      var fallback = document.getElementById('contact-email-fallback');
+      if (!link) return;
+      try {
+        var addr = atob('bWFyc2ljb2RAZ21haWwuY29t');
+        link.textContent = addr;
+        link.href = 'mailto:' + addr + '?subject=' + encodeURIComponent('PandaInk');
+        link.hidden = false;
+        if (fallback) fallback.hidden = true;
+      } catch (e) {
+        // Leave the GitHub fallback message in place.
+      }
+    })();
+  </script>
+
+</body>
+</html>

@@ -7,6 +7,10 @@ Format: `## Unreleased` for pending changes; `## <version> — <date>` for relea
 
 ## Unreleased
 
+- feat: add a Contact page (`docs/contact.html`) with a runtime-assembled (base64-decoded)
+  email address so it isn't scrapable from the page source, plus an "Open an issue on GitHub"
+  button; linked from every page footer. Removed the plaintext `mailto:` addresses that were
+  exposed in `privacy.html` and `thanks.html` (they now point to the Contact page).
 - feat: show a confirmation after a drawing is exported — the desktop GUI pops an "Export
   complete" message box (for SVG/PNG/PDF saves and cloud uploads) and the web app shows an
   "Exported as <filename>" alert after each SVG/PNG/PDF download, so it's clear the export
