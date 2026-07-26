@@ -38,7 +38,7 @@ import time
 import threading
 import tkinter as tk
 import tkinter.font as tkfont
-from tkinter import ttk, messagebox, filedialog
+from tkinter import ttk, messagebox, filedialog, simpledialog
 
 # Allow running from any working directory
 sys.path.insert(0, os.path.dirname(__file__))
@@ -333,6 +333,8 @@ class TuhiGUIApp(tk.Tk):
         self._live_running = False
         self._buttons = {}            # name -> widget, for enable/disable
         self._shown_timestamps = set()  # timestamps already present in Notebook
+        self._tabs = []               # per-tab records (see _add_drawing_tab)
+        self._select_mode = False     # merge-selection mode active?
         self._live_raw_strokes = []         # complete strokes from current live session
         self._live_current_raw_stroke = []  # in-progress stroke (raw device coords)
 
@@ -399,6 +401,21 @@ class TuhiGUIApp(tk.Tk):
             btn.pack(side='left', padx=2)
             self._buttons[name] = btn
 
+        ttk.Separator(bar, orient='vertical').pack(side='left', fill='y', padx=6)
+
+        # Merge selection: toggle Select mode, then Merge the checked drawings.
+        sel_btn = ttk.Button(bar, text='Select', command=self._toggle_select_mode)
+        sel_btn.pack(side='left', padx=2)
+        self._buttons['select'] = sel_btn
+
+        merge_btn = ttk.Button(bar, text='Merge', command=self._cmd_merge)
+        self._buttons['merge'] = merge_btn   # packed only while in select mode
+
+        # Automerge switch (far right).
+        self._automerge_var = tk.BooleanVar(value=self._app.config.automerge)
+        ttk.Checkbutton(bar, text='Automerge', variable=self._automerge_var,
+                        command=self._on_automerge_toggle).pack(side='right', padx=4)
+
         # Notebook with closeable tabs
         self._notebook = ClosableNotebook(self._normal_frame)
         self._notebook.pack(fill='both', expand=True)
@@ -444,6 +461,7 @@ class TuhiGUIApp(tk.Tk):
         for tab in self._notebook.tabs():
             self._notebook.forget(tab)
         self._shown_timestamps.clear()
+        self._tabs = []
         for drawing in sorted(drawings, key=lambda d: d.timestamp):
             self._add_drawing_tab(drawing)
         if drawings:
@@ -559,8 +577,13 @@ class TuhiGUIApp(tk.Tk):
         self._buttons['fetch'].configure(state='disabled')
 
         def on_drawings(app_dev):
-            for drawing in app_dev.drawings.values():
-                self.after(0, lambda d=drawing: self._add_drawing_tab(d))
+            # Under automerge the on-disk file is a single merged canvas, so
+            # reload from disk rather than adding one tab per raw drawing.
+            if self._app.config.automerge:
+                self.after(0, self._load_drawings)
+            else:
+                for drawing in app_dev.drawings.values():
+                    self.after(0, lambda d=drawing: self._add_drawing_tab(d))
 
         self._app.start_listening(self._address, on_drawings=on_drawings)
 
@@ -583,6 +606,7 @@ class TuhiGUIApp(tk.Tk):
         for tab in self._notebook.tabs():
             self._notebook.forget(tab)
         self._shown_timestamps.clear()
+        self._tabs = []
 
         for drawing in sorted(drawings, key=lambda d: d.timestamp):
             self._add_drawing_tab(drawing)
@@ -593,15 +617,40 @@ class TuhiGUIApp(tk.Tk):
     # Drawing tab helper (A6.3: per-tab toolbar)                          #
     # ------------------------------------------------------------------ #
 
+    def _drawing_label(self, drawing):
+        """A drawing's display label: its title, or a formatted timestamp."""
+        title = getattr(drawing, 'title', None)
+        if title:
+            return title
+        return time.strftime('%Y-%m-%d %H:%M', time.localtime(drawing.timestamp))
+
+    def _refresh_tab_label(self, record):
+        """Update a tab's label to reflect its title and selection tick."""
+        label = self._drawing_label(record['drawing'])
+        prefix = '✓ ' if record['check_var'].get() else ''
+        try:
+            self._notebook.tab(record['frame'], text=f'{prefix}{label}  ×')
+        except tk.TclError:
+            pass
+
     def _add_drawing_tab(self, drawing):
         if drawing.timestamp in self._shown_timestamps:
             return   # already shown; avoids duplicates from Listen callbacks
         self._shown_timestamps.add(drawing.timestamp)
 
         ts = time.strftime('%Y-%m-%d %H:%M', time.localtime(drawing.timestamp))
+        label = self._drawing_label(drawing)
         orientation = self._orientation.get()   # frozen at creation time (A6.6)
 
         frame = ttk.Frame(self._notebook)
+
+        record = {
+            'timestamp': drawing.timestamp,
+            'drawing': drawing,
+            'frame': frame,
+            'check_var': tk.BooleanVar(value=False),
+        }
+        self._tabs.append(record)
 
         # --- Per-tab toolbar ---
         toolbar = ttk.Frame(frame)
@@ -685,7 +734,8 @@ class TuhiGUIApp(tk.Tk):
         def _delete_drawing():
             if not messagebox.askyesno(
                     'Delete drawing',
-                    f'Permanently delete drawing from {ts}?\nThis cannot be undone.',
+                    f'Permanently delete drawing "{self._drawing_label(drawing)}"?\n'
+                    'This cannot be undone.',
                     parent=self):
                 return
             json_path = self._app.config.drawing_path(self._address, drawing.timestamp)
@@ -694,8 +744,27 @@ class TuhiGUIApp(tk.Tk):
             except OSError as e:
                 messagebox.showerror('Delete failed', str(e), parent=self)
                 return
-            self._notebook.forget(frame)
-            self._set_status(f'Deleted drawing from {ts}.')
+            self._forget_tab(record)
+            self._set_status(f'Deleted drawing "{self._drawing_label(drawing)}".')
+
+        def _rename_drawing():
+            current = getattr(drawing, 'title', None) or ''
+            new_title = simpledialog.askstring(
+                'Rename drawing',
+                'New name (leave blank to use the timestamp):',
+                initialvalue=current, parent=self)
+            if new_title is None:
+                return   # cancelled
+            new_title = new_title.strip() or None
+            updated = self._app.config.rename_drawing(
+                self._address, drawing.timestamp, new_title)
+            if updated is None:
+                messagebox.showerror('Rename failed',
+                                     'Could not find the drawing on disk.', parent=self)
+                return
+            drawing.title = new_title
+            self._refresh_tab_label(record)
+            self._set_status(f'Renamed drawing to "{self._drawing_label(drawing)}".')
 
         save_menu = tk.Menu(toolbar, tearoff=0)
         save_menu.add_command(label='Save as SVG…', command=lambda: _save_as('SVG'))
@@ -708,11 +777,101 @@ class TuhiGUIApp(tk.Tk):
             save_menu.add_command(label='OneDrive (SVG)', command=_save_onedrive)
 
         ttk.Menubutton(toolbar, text='Export ▾', menu=save_menu).pack(side='left', padx=2)
+        ttk.Button(toolbar, text='Rename', command=_rename_drawing).pack(side='left', padx=2)
         ttk.Button(toolbar, text='Delete', command=_delete_drawing).pack(side='left', padx=2)
 
+        # Merge-selection checkbox — only visible while in Select mode.
+        check = ttk.Checkbutton(toolbar, text='Select for merge',
+                                variable=record['check_var'],
+                                command=lambda: self._refresh_tab_label(record))
+        record['check'] = check
+        if self._select_mode:
+            check.pack(side='right', padx=4)
+
         # × is in the tab label (ClosableNotebook handles the click)
-        self._notebook.add_closeable(frame, ts)
+        self._notebook.add_closeable(frame, label,
+                                     on_close=lambda: self._untrack_tab(record))
         self._notebook.select(frame)
+
+    # ------------------------------------------------------------------ #
+    # Select / Merge / Automerge / Rename                                 #
+    # ------------------------------------------------------------------ #
+
+    def _untrack_tab(self, record):
+        """Stop tracking a tab (its frame was already forgotten)."""
+        self._shown_timestamps.discard(record['timestamp'])
+        try:
+            self._tabs.remove(record)
+        except ValueError:
+            pass
+
+    def _forget_tab(self, record):
+        """Forget a tab's frame from the notebook and stop tracking it."""
+        self._notebook._close_callbacks.pop(str(record['frame']), None)
+        try:
+            self._notebook.forget(record['frame'])
+        except tk.TclError:
+            pass
+        self._untrack_tab(record)
+
+    def _toggle_select_mode(self):
+        self._select_mode = not self._select_mode
+        if self._select_mode:
+            self._buttons['select'].configure(text='Cancel')
+            self._buttons['merge'].pack(side='left', padx=2,
+                                        after=self._buttons['select'])
+            for record in self._tabs:
+                if 'check' in record:
+                    record['check'].pack(side='right', padx=4)
+            self._set_status('Select drawings to merge, then click Merge.')
+        else:
+            self._buttons['select'].configure(text='Select')
+            self._buttons['merge'].pack_forget()
+            for record in self._tabs:
+                record['check_var'].set(False)
+                if 'check' in record:
+                    record['check'].pack_forget()
+                self._refresh_tab_label(record)
+
+    def _cmd_merge(self):
+        selected = [r for r in self._tabs if r['check_var'].get()]
+        if len(selected) < 2:
+            messagebox.showinfo('Merge drawings',
+                                'Select at least two drawings to merge.', parent=self)
+            return
+
+        if not messagebox.askyesno(
+                'Merge drawings',
+                f'Merge {len(selected)} drawings into a single drawing?\n\n'
+                'The originals will be permanently deleted. '
+                'This operation cannot be undone.',
+                parent=self):
+            return
+
+        timestamps = [r['timestamp'] for r in selected]
+        try:
+            merged = self._app.config.merge_drawings(self._address, timestamps)
+        except Exception as e:
+            messagebox.showerror('Merge failed', str(e), parent=self)
+            return
+
+        # Exit select mode and reload the notebook from disk (originals gone,
+        # merged drawing added).
+        self._select_mode = False
+        self._buttons['select'].configure(text='Select')
+        self._buttons['merge'].pack_forget()
+        self._load_drawings()
+        if merged is not None:
+            self._set_status(
+                f'Merged {len(selected)} drawings into "{self._drawing_label(merged)}".')
+
+    def _on_automerge_toggle(self):
+        on = self._automerge_var.get()
+        self._app.config.automerge = on
+        if on:
+            self._set_status('Automerge on — new drawings append to one canvas.')
+        else:
+            self._set_status('Automerge off — new drawings save to separate files.')
 
     # ------------------------------------------------------------------ #
     # Live mode (B4)                                                      #
@@ -804,12 +963,16 @@ class TuhiGUIApp(tk.Tk):
             self._set_status('Live mode stopped.')
             return
 
-        self._app.config.store_drawing(self._address, drawing)
+        stored = self._app.config.store_drawing(self._address, drawing)
 
         # Switch to Normal mode and open the saved drawing as a tab
         self._mode.set('normal')
         self._on_mode_changed()
-        self._add_drawing_tab(drawing)
+        if self._app.config.automerge:
+            # The strokes were folded into the merged canvas — reload from disk.
+            self._load_drawings()
+        else:
+            self._add_drawing_tab(stored or drawing)
         self._set_status(f'Live session saved ({len(drawing.strokes)} stroke(s)).')
 
     def _show_device_button_toast(self):

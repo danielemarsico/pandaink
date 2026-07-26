@@ -31,7 +31,26 @@ Getting Started with PandaInk
    - Cloud upload (Google Drive / Dropbox / OneDrive), when configured,
      uploads the drawing as SVG.
 
-6. Delete a drawing
+6. Rename a drawing
+   - Inside a drawing tab, click [Rename] to give the drawing a name of your own.
+   - Named drawings show the name (instead of the date/time) on their tab.
+   - Leave the field blank to go back to showing the timestamp.
+
+7. Merge drawings
+   - Click [Select] in the action bar to start a selection. A "Select for merge"
+     checkbox appears in each drawing's toolbar (checked tabs show a ✓).
+   - Tick two or more drawings, then click [Merge].
+   - After you confirm, the selected drawings are combined into a single new
+     drawing and the originals are permanently deleted. This cannot be undone.
+
+8. Automerge
+   - Turn on the [Automerge] switch (top-right of the action bar) to have every
+     newly synced or live-saved drawing appended to a single canvas instead of
+     creating a separate file.
+   - Turn it off again and each new drawing is saved to its own file as before.
+   - Toggling the switch starts a fresh merged canvas.
+
+9. Delete a drawing
    - Inside a drawing tab, click [Delete] to permanently remove the file from disk.
    - A confirmation dialog will appear before the file is deleted.
 """

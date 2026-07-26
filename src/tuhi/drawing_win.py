@@ -79,11 +79,14 @@ class Stroke(Object):
 class Drawing(Object):
     JSON_FILE_FORMAT_VERSION = 1
 
-    def __init__(self, name, dimensions, timestamp):
+    def __init__(self, name, dimensions, timestamp, title=None):
         Object.__init__(self)
         self.name = name
         self.dimensions = dimensions
         self.timestamp = timestamp
+        # Optional user-supplied title. When set it is shown instead of the
+        # timestamp; None means "fall back to the formatted timestamp".
+        self.title = title
         self.strokes = []
         self._current_stroke = -1
         self.session_id = 'unset'
@@ -115,6 +118,7 @@ class Drawing(Object):
             'sessionid': self.session_id,
             'dimensions': list(self.dimensions),
             'timestamp': self.timestamp,
+            'title': self.title,
             'strokes': [s.to_dict() for s in self.strokes]
         }
         return json.dumps(json_data, indent=2)
@@ -131,7 +135,8 @@ class Drawing(Object):
                 name = json_data['devicename']
                 dimensions = tuple(json_data['dimensions'])
                 timestamp = json_data['timestamp']
-                d = Drawing(name, dimensions, timestamp)
+                title = json_data.get('title')
+                d = Drawing(name, dimensions, timestamp, title=title)
                 for s in json_data['strokes']:
                     stroke = d.new_stroke()
                     for p in s['points']:

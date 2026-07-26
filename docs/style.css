@@ -469,6 +469,28 @@ footer .footer-links {
   display: flex;
   gap: 0.5rem;
   padding: 0.75rem 0;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* Thin divider + auto-margin push the merge/automerge controls to the right. */
+.action-bar-sep {
+  flex: 1 1 auto;
+}
+
+.automerge-toggle {
+  font-size: 0.85rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.tab-check {
+  margin-right: 0.35rem;
+  vertical-align: middle;
+  cursor: pointer;
 }
 
 .status-bar {
