@@ -6,6 +6,15 @@
   <title>PandaInk — Web App</title>
   <link rel="stylesheet" href="style.css">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
+
+  <!-- Progressive Web App: installable, works on GitHub Pages (HTTPS) -->
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#1e3a5f">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="PandaInk">
   <!-- Supabase JS SDK (ESM via CDN — imported by auth modules) -->
   <script type="importmap">
   {
@@ -35,8 +44,9 @@
       <h2>Web App — Beta</h2>
       <p>Connect your Wacom SmartPad directly in the browser using Web Bluetooth.
          Works on <strong>Chrome / Edge</strong> on Windows, macOS and Android.
-         No install required.</p>
+         Use it right here, or install it as an app for quick access.</p>
       <p class="app-compat-note">⚠ Not supported on Firefox or Safari.</p>
+      <button id="pwa-install" class="btn btn-primary" style="display:none">⬇ Install as app</button>
     </div>
   </section>
 
@@ -69,6 +79,40 @@
       document.getElementById('build-info').textContent =
         commit + ' · ' + t.toLocaleString();
     }).catch(() => {});
+  </script>
+
+  <!-- PWA: register the service worker and wire up the install button -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('sw.js')
+          .catch((e) => console.warn('Service worker registration failed:', e));
+      });
+    }
+
+    // Chromium fires beforeinstallprompt when the app meets install criteria.
+    // Capture it and reveal our own "Install as app" button so the user can
+    // trigger the native install dialog on demand. (On iOS this event never
+    // fires — users install via Share → Add to Home Screen.)
+    let deferredPrompt = null;
+    const installBtn = document.getElementById('pwa-install');
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      deferredPrompt = e;
+      if (installBtn) installBtn.style.display = '';
+    });
+    if (installBtn) {
+      installBtn.addEventListener('click', async () => {
+        if (!deferredPrompt) return;
+        deferredPrompt.prompt();
+        await deferredPrompt.userChoice;
+        deferredPrompt = null;
+        installBtn.style.display = 'none';
+      });
+    }
+    window.addEventListener('appinstalled', () => {
+      if (installBtn) installBtn.style.display = 'none';
+    });
   </script>
 </body>
 </html>

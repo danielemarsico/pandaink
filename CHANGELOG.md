@@ -7,6 +7,13 @@ Format: `## Unreleased` for pending changes; `## <version> — <date>` for relea
 
 ## Unreleased
 
+- feat: the web app is now an installable **Progressive Web App** (works on GitHub Pages,
+  which serves over HTTPS). Adds `manifest.webmanifest`, a service worker (`docs/sw.js`), and
+  192/512 + maskable icons rasterised from the favicon. The service worker caches only the
+  same-origin app shell (network-first for pages, cache-first for assets) and deliberately
+  leaves all cross-origin traffic — Supabase, Google Drive, Dropbox, the Worker, the CDN —
+  untouched, so auth/sync are unaffected. `app.html` gains the manifest/theme/apple meta tags
+  and an "Install as app" button that appears when the browser offers installation.
 - feat: add a Contact page (`docs/contact.html`) with a runtime-assembled (base64-decoded)
   email address so it isn't scrapable from the page source, plus an "Open an issue on GitHub"
   button; linked from every page footer. Removed the plaintext `mailto:` addresses that were
