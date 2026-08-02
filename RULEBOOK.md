@@ -509,6 +509,31 @@ label alongside their timestamp identity.
   automerge is enabled. The target id/timestamp is tracked per device (desktop: `[Automerge]`
   section keyed by BT address; web: `localStorage['pandaink.automergeTarget.<deviceId>']`).
 
+### Web app — installable PWA
+
+The web app is a **Progressive Web App** and can be installed to the home screen / app
+launcher. This works on GitHub Pages because Pages serves over HTTPS (a hard requirement
+for service workers) and can host the manifest, service worker, and icons as ordinary
+static files. Everything uses **relative paths** so it works under the project sub-path
+(`danielemarsico.github.io/pandaink/`).
+
+- **Manifest** (`docs/manifest.webmanifest`): `start_url` `./app.html`, `scope` `./`,
+  `display: standalone`, theme `#1e3a5f`, and 192/512 plus a 512 **maskable** icon
+  (`docs/icons/`, rasterised from `favicon.svg`).
+- **Service worker** (`docs/sw.js`, scope `/pandaink/`): registered from `app.html`. It
+  **only touches same-origin GET requests** — cross-origin traffic (Supabase, Google Drive,
+  Dropbox, the Worker, the jsDelivr CDN) always goes straight to the network and is never
+  cached or blocked, so auth/API/BLE flows are unaffected. Navigations are network-first (new
+  deploys win; the cached shell is the offline fallback); other static assets are cache-first
+  with runtime population; `version.json` is always fetched fresh. A cache version tag
+  (`pandaink-shell-v1`) lets `activate` purge old caches.
+- **Install UX** (`app.html`): standard `<link rel="manifest">` + theme-color +
+  apple-touch-icon/meta tags make the browser offer its native install. An **"Install as app"**
+  button also appears when Chromium fires `beforeinstallprompt`, triggering the install dialog
+  on demand. On iOS (no `beforeinstallprompt`) users install via Share → Add to Home Screen —
+  note Web Bluetooth itself is still unsupported there, so an installed iOS copy can view but
+  not sync.
+
 ### Live-session sharing (planned)
 
 Real-time spectating of a live drawing session. The drawing user's browser captures pen data
