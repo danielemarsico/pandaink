@@ -245,6 +245,17 @@ provider from `profiles.storage_provider` and gates the paid ones on `profiles.p
   and migration `005_storage_cap.sql` adds a `BEFORE INSERT` trigger on `storage.objects` that
   authoritatively rejects it server-side for `plan = 'free'` users even if the client check is
   bypassed. Overwriting an existing drawing (same object name) never counts against the cap.
+  Only an explicit `profiles.plan = 'pro'` lifts the cap — a user with **no** `profiles` row is
+  treated as free, not as unlimited.
+- The cap counts objects **in Supabase Storage**, not drawings on the device. The local
+  IndexedDB store is deliberately uncapped (it is the source of truth and must never drop a
+  drawing), so at the cap the app can legitimately show more than 10 drawings locally with the
+  extras badged as "not yet in cloud". The Profile panel shows `N / 10 drawings used` so the
+  remaining allowance is visible before a sync hits it.
+- Client-side saves to Supabase Storage are **serialized within a tab** (`supabase_store.js`):
+  the cap check is a list-then-upload sequence, and two overlapping saves could otherwise both
+  read the same pre-cap count and land an 11th object. Concurrent uploads from *different*
+  tabs or devices are caught by the trigger.
 
 ### Provider selection rules
 
@@ -380,7 +391,7 @@ The backend is a **Cloudflare Worker** (chosen over the earlier Render/Vercel id
 | Layer | Service | Role |
 |---|---|---|
 | Frontend | **GitHub Pages** (`docs/`) | web app UI + all Web Bluetooth (connect, register, sync, live capture) — unchanged location |
-| Backend | **Cloudflare Worker** | holds Google + Dropbox OAuth **client secrets**; does token **exchange/refresh**; enforces the Supabase Storage 10-drawing cap; performs account deletion (Supabase service-role); **broadcasts live sessions** to viewers via a Durable Object |
+| Backend | **Cloudflare Worker** | holds Google + Dropbox OAuth **client secrets**; does token **exchange/refresh**; performs account deletion (Supabase service-role); **broadcasts live sessions** to viewers via a Durable Object |
 | Database | **Supabase** | unchanged: auth, profiles (incl. `plan`), devices, `storage_tokens`; plus the Supabase Storage provider |
 
 Division of responsibilities:

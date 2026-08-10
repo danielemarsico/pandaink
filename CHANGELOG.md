@@ -7,6 +7,24 @@ Format: `## Unreleased` for pending changes; `## <version> — <date>` for relea
 
 ## Unreleased
 
+- fix: the free-plan 10-drawing cap could be exceeded. The server-side trigger
+  (`005_storage_cap.sql`) skipped the cap entirely for any user without a `profiles` row —
+  their `plan` read back as null and null was treated as Pro — so such an account could upload
+  an unlimited number of drawings. It now caps unless the plan is explicitly `pro`, and counts
+  only `*.json` objects so client and database agree. **Requires re-running the migration.**
+- fix: uploads to Supabase Storage are serialized per tab. The cap check lists the bucket and
+  then uploads; two overlapping saves (a BLE sync and a "Sync now" retry, say) could both read
+  the same pre-cap count and both upload, leaving 11 drawings stored.
+- fix: a cap rejection coming from the database (rather than the client pre-check) is now
+  reported as the same friendly "Free plan is limited to 10 drawings" message instead of a raw
+  Supabase Storage error.
+- fix: merging drawings no longer deletes the cloud copies of the originals when the merged
+  drawing failed to upload (e.g. the free-plan cap was reached) — that erased them from the
+  cloud with no replacement. The merge status now reports the upload failure instead of
+  silently claiming success.
+- feat: the Profile panel shows `N / 10 drawings used` on the Supabase Storage row, highlighted
+  when the free-plan limit is reached.
+
 - feat: the web app is now an installable **Progressive Web App** (works on GitHub Pages,
   which serves over HTTPS). Adds `manifest.webmanifest`, a service worker (`docs/sw.js`), and
   192/512 + maskable icons rasterised from the favicon. The service worker caches only the

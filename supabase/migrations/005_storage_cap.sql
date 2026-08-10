@@ -6,8 +6,11 @@
 -- directly against the Storage API. This trigger makes the limit real: any
 -- INSERT into the 'drawings' bucket by a user whose profiles.plan is 'free'
 -- is rejected once they already have 10 objects in their <user_id>/ folder.
--- Pro users are unaffected (no cap). Overwriting an existing drawing (same
--- object name, e.g. an upsert) never counts against the cap.
+-- Only an explicit profiles.plan = 'pro' lifts the cap. Overwriting an existing
+-- drawing (same object name, e.g. an upsert) never counts against the cap.
+--
+-- This file is idempotent (CREATE OR REPLACE + DROP/CREATE TRIGGER) — re-running
+-- it in the SQL editor safely replaces whatever version is live.
 
 create or replace function public.enforce_drawing_cap()
 returns trigger
@@ -32,15 +35,19 @@ begin
   v_owner_id := (storage.foldername(new.name))[1]::uuid;
 
   select plan into user_plan from public.profiles where id = v_owner_id;
-  if user_plan is distinct from 'free' then
-    return new;  -- pro (or missing profile) — no cap
+  -- A missing profiles row must NOT mean "uncapped": treat anything that isn't
+  -- an explicit 'pro' as free. (The previous `is distinct from 'free'` test let
+  -- a user with no profile row -- user_plan null -- upload without any limit.)
+  if coalesce(user_plan, 'free') = 'pro' then
+    return new;  -- pro — no cap
   end if;
 
   select count(*) into existing_count
   from storage.objects
   where bucket_id = 'drawings'
     and (storage.foldername(name))[1] = v_owner_id::text
-    and name != new.name;  -- an overwrite of the same object is not a new drawing
+    and name like '%.json'  -- count drawings only, same as supabase_store.js
+    and name != new.name;   -- an overwrite of the same object is not a new drawing
 
   if existing_count >= max_drawings then
     raise exception 'Free plan is limited to % drawings. Delete an old drawing or upgrade to Pro.', max_drawings

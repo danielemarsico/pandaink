@@ -1039,19 +1039,28 @@ export class AppController {
             merged.id = id;
 
             const cloudOn = await this._isCloudOn();
+            let mergedUploaded = false;
+            let uploadError    = null;
             if (cloudOn) {
                 try {
                     const up = await cloudStore.saveDrawing(this._user.id, merged);
                     await localStore.updateDrawing({ ...merged, uploaded: true, driveFileId: up.driveFileId });
+                    mergedUploaded = true;
                 } catch (e) {
                     console.warn('Cloud upload of merged drawing failed (kept locally):', e);
+                    uploadError = e;
                 }
             }
 
-            // Delete the originals (local + cloud) now the merged copy is saved.
+            // Delete the originals now the merged copy is saved. The local copies
+            // always go (the merged drawing carries their strokes), but the CLOUD
+            // originals are only removed once the merged copy is actually in the
+            // cloud — deleting them after a failed upload (a free-plan cap hit, say)
+            // would erase those drawings from the cloud with nothing to replace them.
+            const dropCloudOriginals = cloudOn && mergedUploaded;
             for (const d of selected) {
                 if (d.id != null) await localStore.deleteDrawing(d.id);
-                if (d.driveFileId && cloudOn) {
+                if (d.driveFileId && dropCloudOriginals) {
                     try { await cloudStore.deleteDrawing(this._user.id, d.driveFileId); }
                     catch (e) { console.warn('Cloud delete failed during merge:', e); }
                 }
@@ -1063,7 +1072,13 @@ export class AppController {
             this._root.querySelector('#btn-select').textContent = 'Select';
             this._root.querySelector('#btn-merge').style.display = 'none';
             await this._loadStoredDrawings();
-            this._setStatus(`Merged ${selected.length} drawings into one.`);
+            if (uploadError) {
+                this._setStatus(
+                    `Merged ${selected.length} drawings into one — saved locally, but not uploaded: ` +
+                    `${uploadError.message}`);
+            } else {
+                this._setStatus(`Merged ${selected.length} drawings into one.`);
+            }
         } catch (e) {
             this._setStatus('Merge failed: ' + e.message);
         }
