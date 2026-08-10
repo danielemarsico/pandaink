@@ -9,26 +9,6 @@ These steps need external dashboards and accounts and can only be done by the pr
 Do them at your own pace; each is independent unless noted.
 
 ### Supabase
-- [ ] **URGENT — re-run `005_storage_cap.sql` again** in the Supabase SQL editor (reported case:
-      a free account uploaded an 11th drawing). The live version exempts any user whose
-      `profiles` row is missing — `plan` comes back null and the old `is distinct from 'free'`
-      test treated that as Pro, i.e. **no cap at all**. The migration now caps unless the plan
-      is explicitly `'pro'`, and counts only `*.json` objects so it agrees with the client.
-      `CREATE OR REPLACE FUNCTION` overwrites the live one in place.
-      After running, verify with:
-      `select id, plan from public.profiles where id = '<user_id>';` — a missing row for an
-      active user is itself the bug; recreate it with `insert into public.profiles (id) values ('<user_id>');`
-      and check for other users in the same state:
-      `select u.id, u.email from auth.users u left join public.profiles p on p.id = u.id where p.id is null;`
-- [x] **DONE — re-run `005_storage_cap.sql`** in the Supabase SQL editor. The version already
-      live in production has a bug (`42702 ambiguous_column` — a local variable named `owner_id`
-      collided with `storage.objects`'s own `owner_id` column) that currently rejects **every**
-      cloud upload for free-plan users, not just the 11th. Fixed in the migration file (renamed
-      to `v_owner_id`); `CREATE OR REPLACE FUNCTION` safely overwrites the broken one in place.
-- [ ] **URGENT — run `006_kofi_events.sql`** in the Supabase SQL editor. The Worker was just
-      deployed with code that requires the new `kofi_events` table (Ko-fi transaction-id replay
-      guard) — until this migration runs, **every real Ko-fi webhook call will fail with a 500**
-      (confirmed: the table doesn't exist yet in production as of this deploy).
 - [ ] **Submit the Google OAuth consent screen for verification** — required to remove the
       "unverified app" warning users see when connecting Google Drive (the app requests the
       sensitive `drive.appdata` scope). Not required for Google/GitHub sign-in itself — those
@@ -94,10 +74,6 @@ These need the admin steps above finished first. Grouped by which admin action u
 - [ ] Buy the $5 Pro item with the account email → `profiles.plan` flips to `pro` → Drive &
       Dropbox unlock in the picker. Verify a mismatched email is handled (manual reconcile).
 
-**Hardware (needs the Bamboo Folio):**
-- [x] Full device sync → each drawing gets a ☁↑ badge with no cloud, flips to ☁✓ once a
-      provider is connected.
-
 ---
 
 ## Windows App
@@ -147,9 +123,6 @@ entitlement flag; Pro is a one-time $5 Ko-fi purchase. **Code is now implemented
 remaining unchecked items are Daniele's admin setup (see "Manual Actions") and end-to-end
 testing (see "Blocked on Daniele's manual actions").
 
-- [x] **S1 hardware test** (local IndexedDB store + loss protection) — sync with no cloud
-      → drawings appear and persist across reload; then connect Drive → pending drawings upload.
-- [x] Follow-up: lazy "cloud-only, not cached" (☁↓) state — reconciliation caches eagerly now.
 - [ ] Follow-up (decide with user): migration-on-switch between providers.
 
 ### Authentication — finish (rules in RULEBOOK.md → "Feature Tracking")

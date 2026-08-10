@@ -12,3 +12,4 @@ build/PandaInk/
 .env
 .claude/settings.local.json
 worker/.wrangler/
+supabase/.temp/
