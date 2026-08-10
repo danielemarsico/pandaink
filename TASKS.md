@@ -9,7 +9,18 @@ These steps need external dashboards and accounts and can only be done by the pr
 Do them at your own pace; each is independent unless noted.
 
 ### Supabase
-- [x] **URGENT — re-run `005_storage_cap.sql`** in the Supabase SQL editor. The version already
+- [ ] **URGENT — re-run `005_storage_cap.sql` again** in the Supabase SQL editor (reported case:
+      a free account uploaded an 11th drawing). The live version exempts any user whose
+      `profiles` row is missing — `plan` comes back null and the old `is distinct from 'free'`
+      test treated that as Pro, i.e. **no cap at all**. The migration now caps unless the plan
+      is explicitly `'pro'`, and counts only `*.json` objects so it agrees with the client.
+      `CREATE OR REPLACE FUNCTION` overwrites the live one in place.
+      After running, verify with:
+      `select id, plan from public.profiles where id = '<user_id>';` — a missing row for an
+      active user is itself the bug; recreate it with `insert into public.profiles (id) values ('<user_id>');`
+      and check for other users in the same state:
+      `select u.id, u.email from auth.users u left join public.profiles p on p.id = u.id where p.id is null;`
+- [x] **DONE — re-run `005_storage_cap.sql`** in the Supabase SQL editor. The version already
       live in production has a bug (`42702 ambiguous_column` — a local variable named `owner_id`
       collided with `storage.objects`'s own `owner_id` column) that currently rejects **every**
       cloud upload for free-plan users, not just the 11th. Fixed in the migration file (renamed

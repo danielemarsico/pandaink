@@ -11,6 +11,7 @@ import {
     startDropboxAuth, disconnectDropbox,
 } from '../auth/dropbox_oauth.js';
 import * as cloudStore from '../storage/cloud_store.js';
+import { MAX_DRAWINGS } from '../storage/supabase_store.js';
 import { KOFI_PRO_URL } from '../config.js';
 import {
     isSyncTraceEnabled, setSyncTraceEnabled, getSyncTraceLog, clearSyncTraceLog,
@@ -250,6 +251,14 @@ export class ProfilePanel {
             catch { driveInfo = null; }
         }
 
+        // How much of the free-plan allowance is used. Shown on the Supabase row so
+        // the cap is visible BEFORE a sync hits it. Best-effort, same as driveInfo.
+        let supabaseUsed = null;
+        if (conn.supabase) {
+            try { supabaseUsed = await cloudStore.PROVIDERS.supabase.module.countDrawings(); }
+            catch { supabaseUsed = null; }
+        }
+
         const planTag = isPro
             ? '<span class="pp-plan pp-plan-pro">Pro</span>'
             : '<span class="pp-plan pp-plan-free">Free</span>';
@@ -268,9 +277,17 @@ export class ProfilePanel {
             } else {
                 action = '<span class="pp-muted">No connect needed</span>';
             }
-            const tier = p.paid ? 'Pro' : 'Free · max 10';
+            const tier = p.paid ? 'Pro' : `Free · max ${MAX_DRAWINGS}`;
 
             let detail = '';
+            if (p.id === 'supabase' && supabaseUsed != null) {
+                const full = supabaseUsed >= MAX_DRAWINGS;
+                const note = full
+                    ? ' — limit reached, delete a drawing or upgrade to Pro'
+                    : '';
+                detail = `<div class="pp-provider-detail ${full ? 'pp-warn' : 'pp-muted'}">` +
+                         `${supabaseUsed} / ${MAX_DRAWINGS} drawings used${note}</div>`;
+            }
             if (p.id === 'google_drive' && driveInfo) {
                 const parts = [];
                 if (driveInfo.email) parts.push(driveInfo.email);
