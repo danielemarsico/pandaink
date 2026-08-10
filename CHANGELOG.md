@@ -11,7 +11,9 @@ Format: `## Unreleased` for pending changes; `## <version> — <date>` for relea
   (`005_storage_cap.sql`) skipped the cap entirely for any user without a `profiles` row —
   their `plan` read back as null and null was treated as Pro — so such an account could upload
   an unlimited number of drawings. It now caps unless the plan is explicitly `pro`, and counts
-  only `*.json` objects so client and database agree. **Requires re-running the migration.**
+  only `*.json` objects so client and database agree. Deployed and verified end-to-end against
+  the live Storage REST API (bypassing the client-side check entirely): an 11th direct upload
+  for a free-plan account is rejected with a `P0001` database error.
 - fix: uploads to Supabase Storage are serialized per tab. The cap check lists the bucket and
   then uploads; two overlapping saves (a BLE sync and a "Sync now" retry, say) could both read
   the same pre-cap count and both upload, leaving 11 drawings stored.

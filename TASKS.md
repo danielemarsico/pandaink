@@ -54,11 +54,6 @@ Do them at your own pace; each is independent unless noted.
 
 These need the admin steps above finished first. Grouped by which admin action unblocks them.
 
-**After migration `005_storage_cap.sql` is run:**
-- [ ] Verify the trigger actually rejects an 11th drawing for a free-plan user uploaded
-      *directly* against the Storage REST API (bypassing `supabase_store.js`'s client-side
-      check) — confirms the cap is real, not just a UX nicety.
-
 **After `DROPBOX_CLIENT_ID` is set (and a Pro account):**
 - [ ] Connect Dropbox, sync a drawing, confirm `drawing_<ts>.json` lands in the app folder and
       re-appears after reload / on another browser (reconciliation).
