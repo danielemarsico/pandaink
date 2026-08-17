@@ -97,10 +97,16 @@ export async function saveDrawing(drawing) {
 /**
  * Load all drawings for a device, sorted by timestamp ascending.
  * Each returned object has an extra driveFileId field for later deletion.
+ *
+ * Returns { drawings, incomplete }. `incomplete` is true when at least one file
+ * could not be downloaded or parsed: the listing is then a partial view of the
+ * cloud, and the caller must NOT conclude that a missing drawing was deleted
+ * remotely (see _reconcileCloud in app_controller.js).
  */
-export async function getDrawingsByDevice(deviceId) {
+export async function fetchDrawings(deviceId) {
     const files = await _listFiles('drawing_');
     const drawings = [];
+    let incomplete = false;
     // Download in parallel (max 6 at a time to avoid rate limits)
     const chunks = [];
     for (let i = 0; i < files.length; i += 6) chunks.push(files.slice(i, i + 6));
@@ -108,11 +114,15 @@ export async function getDrawingsByDevice(deviceId) {
         const results = await Promise.all(chunk.map(f =>
             _download(f.id).then(d => ({ ...d, driveFileId: f.id })).catch(() => null)
         ));
+        if (results.some(r => r === null)) incomplete = true;
         drawings.push(...results.filter(Boolean));
     }
-    return drawings
-        .filter(d => d.deviceId === deviceId)
-        .sort((a, b) => a.timestamp - b.timestamp);
+    return {
+        drawings: drawings
+            .filter(d => d.deviceId === deviceId)
+            .sort((a, b) => a.timestamp - b.timestamp),
+        incomplete,
+    };
 }
 
 /**

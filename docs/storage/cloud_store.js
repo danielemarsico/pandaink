@@ -2,7 +2,7 @@
 //
 // The active provider comes from profiles.storage_provider; paid providers
 // (Google Drive, Dropbox) require profiles.plan === 'pro'. Every provider module
-// implements the same interface (saveDrawing / getDrawingsByDevice / deleteDrawing
+// implements the same interface (saveDrawing / fetchDrawings / deleteDrawing
 // / isConnected), so app_controller.js talks only to this abstraction.
 
 import { getProfile, updateProfile } from '../auth/auth_manager.js';
@@ -59,6 +59,15 @@ export async function activeProviderName(userId) {
     return prov ? prov.name : null;
 }
 
+// Id of the active provider ('supabase' / 'google_drive' / 'dropbox'), or null.
+// Stored on each local record as `cloudProvider` so reconciliation can tell a
+// drawing deleted remotely from one that simply lives in a provider the user
+// has since switched away from.
+export async function activeProviderId(userId) {
+    const prov = await getActiveProvider(userId);
+    return prov ? prov.id : null;
+}
+
 // Whether the active provider is currently usable (chosen, unlocked, connected).
 export async function isCloudConnected(userId) {
     const prov = await getActiveProvider(userId);
@@ -74,10 +83,13 @@ export async function saveDrawing(userId, drawing) {
     return prov.module.saveDrawing(drawing);
 }
 
-export async function getDrawingsByDevice(userId, deviceId) {
+// Returns { drawings, incomplete } — see the provider modules. `incomplete` is
+// true when part of the cloud listing could not be read, in which case the
+// caller must treat the result as a partial view.
+export async function fetchDrawings(userId, deviceId) {
     const prov = await getActiveProvider(userId);
-    if (!prov) return [];
-    return prov.module.getDrawingsByDevice(deviceId);
+    if (!prov) return { drawings: [], incomplete: true };
+    return prov.module.fetchDrawings(deviceId);
 }
 
 export async function deleteDrawing(userId, fileId) {

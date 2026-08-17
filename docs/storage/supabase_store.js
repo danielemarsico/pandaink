@@ -10,7 +10,7 @@
 //
 // Same interface as gdrive_store.js:
 //   saveDrawing(drawing) -> { ...drawing, driveFileId }   (driveFileId = object path)
-//   getDrawingsByDevice(deviceId) -> [ { ...record, driveFileId } ]
+//   fetchDrawings(deviceId) -> { drawings: [ { ...record, driveFileId } ], incomplete }
 //   deleteDrawing(path)
 //   isConnected() -> boolean
 
@@ -104,10 +104,11 @@ async function _saveDrawing(drawing) {
     return { ...drawing, driveFileId: path };
 }
 
-export async function getDrawingsByDevice(deviceId) {
+export async function fetchDrawings(deviceId) {
     const userId  = await _userId();
     const objects = await _list(userId);
     const out     = [];
+    let incomplete = false;
 
     // Download in small parallel batches to stay friendly to the API.
     for (let i = 0; i < objects.length; i += 6) {
@@ -121,12 +122,18 @@ export async function getDrawingsByDevice(deviceId) {
                 return { ...rec, driveFileId: path };
             } catch { return null; }
         }));
+        // An object we could not read leaves the listing partial — the caller
+        // must not treat drawings missing from it as remotely deleted.
+        if (results.some((r) => r === null)) incomplete = true;
         out.push(...results.filter(Boolean));
     }
 
-    return out
-        .filter((d) => d.deviceId === deviceId)
-        .sort((a, b) => a.timestamp - b.timestamp);
+    return {
+        drawings: out
+            .filter((d) => d.deviceId === deviceId)
+            .sort((a, b) => a.timestamp - b.timestamp),
+        incomplete,
+    };
 }
 
 export async function deleteDrawing(path) {

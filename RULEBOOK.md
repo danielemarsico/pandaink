@@ -308,12 +308,42 @@ Cloud sync is **automatic in the background**, with a manual "Sync now" control 
 
 - **After each device sync**, every newly downloaded drawing is uploaded to the active
   provider (best-effort; a failure leaves it local-only and pending — see loss protection).
-- **On app load**, pending (not-yet-uploaded) drawings are retried, and **cloud-only drawings
-  are reconciled into the local list** (drawings saved from another device/browser are pulled
-  down so the list is complete across devices).
+- **On app load**, pending (not-yet-uploaded) drawings are retried and the local list is
+  **reconciled with the cloud** (see below).
 - A manual **"Sync now"** button forces the same push-pending + pull-cloud pass on demand.
+- **When the tab regains focus** the same pass runs again, throttled to at most once a
+  minute and skipped during a live session, so a change made in another session shows up
+  without the user reaching for "Sync now".
 - Device → browser sync itself stays **manual** (the user presses Sync) — it needs Web
   Bluetooth, which only runs in the browser.
+
+#### Reconciliation rules (two-way)
+
+Reconciliation is **two-way**: an edit or a deletion made in another session or on another
+device must reach this one, not just new drawings. Each record carries `updatedAt` (ms
+epoch, bumped on every local edit) as a **last-write-wins clock**, and `cloudProvider` (the
+provider its `driveFileId` belongs to). Per timestamp:
+
+| Local | Cloud | Action |
+|---|---|---|
+| — | present | download and cache locally (name included), marked synced |
+| present | present, cloud `updatedAt` newer | overwrite the local strokes/name from the cloud |
+| present | present, local `updatedAt` newer | mark pending; the push pass uploads it |
+| present, synced to **this** provider | absent | deleted elsewhere → **remove the local copy** |
+| present, synced to a **different** provider | absent | provider switch → mark pending so the new provider gets it |
+| present, pending | absent | leave alone; the push pass owns it |
+
+The "remove the local copy" rule is the only destructive one, so it is deliberately
+conservative: it runs **only** when the provider returned a *complete* listing (each
+provider reports `incomplete` when any file failed to download or parse) and **only** for
+records stamped with the provider just listed. A partial listing, an unreadable file, or a
+provider switch must never wipe the local library.
+
+**Deferred deletions.** Deleting a drawing while the provider is unreachable can't remove the
+cloud copy, and the next pull would download it straight back. The intent is queued in
+`localStorage['pandaink.pendingDeletes.<deviceId>']` (`{timestamp, fileId, provider}`),
+retried at the start of every reconciliation, and honoured in the meantime — a queued
+timestamp is never pulled back down.
 
 ### Distinguishing local-only vs cloud-synced drawings
 
@@ -487,6 +517,25 @@ Shared implementation notes:
   disable themselves while rendering. Default filename is `drawing_<timestamp>.<ext>`.
 - **Cloud upload** (desktop Google Drive / Dropbox / OneDrive) still uploads **SVG** only.
 
+### Canvas view — zoom, pan, line width (web)
+
+Handwriting rendered at the full page size is small, and the original stroke weight
+(0.75–2.5 px on screen, by pressure) filled in loops and made dense notes unreadable. Each
+drawing tab therefore carries a **view control row** above the canvas
+(`docs/ui/drawing_canvas.js` + `_buildViewControls` in `docs/ui/app_controller.js`):
+
+- **Zoom** — `−` / `+` buttons (1.25× steps), a live percentage, and `Reset`. Also the mouse
+  wheel (zooming about the cursor), **drag to pan**, and **double-click to reset**. Clamped
+  to 0.5×–16×. Zoom is per-tab view state and is not persisted.
+- **Line width** — a slider from **0.2× to 3.0×** scaling the pressure-derived stroke width.
+  The setting is global and persisted (`localStorage['pandaink.lineWidth']`), applies to the
+  live canvas as well, and **defaults to 0.6×** — the previous 1.0× was too heavy to read.
+- Stroke width is expressed in **on-screen pixels** and divided by the total scale, so ink
+  keeps the same apparent thickness at any zoom: zooming in enlarges the handwriting without
+  fattening the line. The canvas backing store is sized by `devicePixelRatio` so strokes stay
+  crisp on HiDPI screens.
+- Export (SVG/PNG/PDF) is unaffected — the controls change the on-screen view only.
+
 ### Drawing management — rename, merge, automerge
 
 Three drawing-organisation features, implemented identically in the **desktop GUI**
@@ -499,8 +548,11 @@ label alongside their timestamp identity.
   record). A `Rename` button in each drawing's toolbar prompts for a name; when set, the
   tab shows the name instead of the timestamp, and it becomes the default export filename.
   Clearing the name reverts to the timestamp. The timestamp (and the on-disk / cloud file
-  name) never changes — rename only edits the label. Web renames also re-upload the record
-  so the name follows the drawing across devices (best-effort).
+  name) never changes — rename only edits the label. A web rename is treated as a normal
+  edit: it bumps `updatedAt`, marks the record **pending**, and re-uploads immediately when
+  possible. If that upload fails the record stays pending and the next sync pass pushes it,
+  so a name can never end up stranded on one browser; on other devices the newer `updatedAt`
+  makes the reconciliation adopt it.
 
 - **Merge.** A `Select` toggle in the action bar enters selection mode: a checkbox appears
   for each drawing. The user ticks two or more, clicks `Merge`, and confirms a warning that
@@ -535,9 +587,13 @@ static files. Everything uses **relative paths** so it works under the project s
   **only touches same-origin GET requests** — cross-origin traffic (Supabase, Google Drive,
   Dropbox, the Worker, the jsDelivr CDN) always goes straight to the network and is never
   cached or blocked, so auth/API/BLE flows are unaffected. Navigations are network-first (new
-  deploys win; the cached shell is the offline fallback); other static assets are cache-first
-  with runtime population; `version.json` is always fetched fresh. A cache version tag
-  (`pandaink-shell-v1`) lets `activate` purge old caches.
+  deploys win; the cached shell is the offline fallback); other static assets use
+  **stale-while-revalidate** — the cached copy is served immediately and refreshed in the
+  background for the next load. (Plain cache-first pinned each visitor to the modules cached
+  on their first visit, so a deploy fixing a bug in `docs/ui/*.js` never reached them.)
+  `version.json` is always fetched fresh. A cache version tag (`pandaink-shell-v2`) lets
+  `activate` purge old caches — bump it on any release that must invalidate what visitors
+  already hold.
 - **Install UX** (`app.html`): standard `<link rel="manifest">` + theme-color +
   apple-touch-icon/meta tags make the browser offer its native install. An **"Install as app"**
   button also appears when Chromium fires `beforeinstallprompt`, triggering the install dialog

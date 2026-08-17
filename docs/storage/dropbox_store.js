@@ -4,7 +4,7 @@
 //
 // Same interface as gdrive_store.js:
 //   saveDrawing(drawing) -> { ...drawing, driveFileId }   (driveFileId = Dropbox path)
-//   getDrawingsByDevice(deviceId) -> [ { ...record, driveFileId } ]
+//   fetchDrawings(deviceId) -> { drawings: [ { ...record, driveFileId } ], incomplete }
 //   deleteDrawing(path)
 //   isConnected()
 
@@ -39,7 +39,7 @@ export async function saveDrawing(drawing) {
     return { ...drawing, driveFileId: path };
 }
 
-export async function getDrawingsByDevice(deviceId) {
+export async function fetchDrawings(deviceId) {
     const token = await _token();
 
     // List the app folder.
@@ -55,6 +55,7 @@ export async function getDrawingsByDevice(deviceId) {
     );
 
     const out = [];
+    let incomplete = false;
     for (let i = 0; i < files.length; i += 6) {
         const batch = files.slice(i, i + 6);
         const results = await Promise.all(batch.map(async (f) => {
@@ -71,12 +72,18 @@ export async function getDrawingsByDevice(deviceId) {
                 return { ...rec, driveFileId: f.path_lower };
             } catch { return null; }
         }));
+        // A file we could not read leaves the listing partial — the caller must
+        // not treat drawings missing from it as remotely deleted.
+        if (results.some((r) => r === null)) incomplete = true;
         out.push(...results.filter(Boolean));
     }
 
-    return out
-        .filter((d) => d.deviceId === deviceId)
-        .sort((a, b) => a.timestamp - b.timestamp);
+    return {
+        drawings: out
+            .filter((d) => d.deviceId === deviceId)
+            .sort((a, b) => a.timestamp - b.timestamp),
+        incomplete,
+    };
 }
 
 export async function deleteDrawing(path) {

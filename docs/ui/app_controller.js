@@ -36,6 +36,16 @@ function isNetworkError(e) {
     return e instanceof TypeError;
 }
 
+// Stroke thickness multiplier applied to the drawing and live canvases. The
+// original 1.0 rendered handwriting too thick to read on a laptop screen, so the
+// shipped default is thinner; the slider in each drawing tab overrides it.
+const LINE_WIDTH_DEFAULT = 0.6;
+const LINE_WIDTH_MIN     = 0.2;
+const LINE_WIDTH_MAX     = 3;
+
+// Don't re-poll the cloud more often than this when the tab regains focus.
+const CLOUD_REFRESH_INTERVAL_MS = 60_000;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // AppController
 // ─────────────────────────────────────────────────────────────────────────────
@@ -55,9 +65,15 @@ export class AppController {
         this._selectMode  = false;   // merge-selection mode active?
         this._selected    = new Set();   // selected drawing timestamps (stable key)
         this._automerge   = localStorage.getItem('pandaink.automerge') === '1';
+        this._lineWidth   = this._loadLineWidth();
         this._activeDrawingIndex = -1;
+        this._activeTimestamp    = null;   // keeps the open tab across re-renders
+        this._viewByTs    = new Map();     // per-drawing zoom/pan, kept across re-renders
         this._liveCanvas  = null;
+        this._activeDrawingCanvas = null;
         this._profilePanel = null;
+        this._cloudBusy   = false;   // a cloud pass is already running
+        this._lastCloudRefresh = 0;
 
         this._ble.ondisconnect = () => this._onDisconnect();
     }
@@ -83,6 +99,12 @@ export class AppController {
 
         // Show a set-new-password panel when the user returns via a reset email.
         onPasswordRecovery(() => this._showRecoveryPanel());
+
+        // Pick up changes made in another session when this tab regains focus.
+        document.addEventListener('visibilitychange', () => {
+            this._maybeRefreshFromCloud().catch((e) =>
+                console.warn('Background cloud refresh failed:', e));
+        });
 
         await this._renderRoot();
     }
@@ -368,7 +390,10 @@ export class AppController {
         });
 
         const liveEl = r('#live-canvas');
-        this._liveCanvas = new LiveCanvas(liveEl, { orientation: this._orientation });
+        this._liveCanvas = new LiveCanvas(liveEl, {
+            orientation:     this._orientation,
+            lineWidthFactor: this._lineWidth,
+        });
 
         // Live sharing is only offered when a backend (Worker) is configured.
         if (hasWorker()) r('#live-share-wrap').style.display = '';
@@ -521,13 +546,15 @@ export class AppController {
                     this._setStatus(`Press the button on the device (LED solid green) to start sync… (${secondsLeft}s)`),
                 onDrawing: async (d) => {
                     const record = {
-                        deviceId:    this._deviceInfo.id,
-                        timestamp:   d.timestamp,
-                        dimensions:  d.dimensions,
-                        strokes:     d.strokes,
-                        uploaded:    false,
-                        driveFileId: null,
-                        name:        null,
+                        deviceId:      this._deviceInfo.id,
+                        timestamp:     d.timestamp,
+                        dimensions:    d.dimensions,
+                        strokes:       d.strokes,
+                        uploaded:      false,
+                        driveFileId:   null,
+                        cloudProvider: null,
+                        name:          null,
+                        updatedAt:     Date.now(),
                     };
                     // Automerge folds strokes into one canvas; otherwise each
                     // drawing is its own record. Local save always happens first
@@ -607,8 +634,9 @@ export class AppController {
 
         let toUpload;
         if (target) {
-            target.strokes  = target.strokes.concat(record.strokes);
-            target.uploaded = false;   // strokes changed — cloud copy is now stale
+            target.strokes   = target.strokes.concat(record.strokes);
+            target.uploaded  = false;   // strokes changed — cloud copy is now stale
+            target.updatedAt = Date.now();
             await localStore.updateDrawing(target);
             toUpload = target;
         } else {
@@ -621,7 +649,7 @@ export class AppController {
         if (cloudOn) {
             try {
                 const up = await cloudStore.saveDrawing(this._user.id, toUpload);
-                await localStore.updateDrawing({ ...toUpload, uploaded: true, driveFileId: up.driveFileId });
+                await this._markUploaded(toUpload, up);
                 out.uploaded = true;
             } catch (e) {
                 if (e.code === 'CAP_REACHED') out.capHit = true;
@@ -636,8 +664,10 @@ export class AppController {
 
     async _loadStoredDrawings() {
         if (!this._deviceInfo) return;
-        this._cloudOffline = false;
-        this._uploadError  = null;
+        this._cloudOffline  = false;
+        this._uploadError   = null;
+        this._reconcileStats = { added: 0, updated: 0, removed: 0 };
+        this._cloudBusy     = true;
         try {
             this._setStatus('Loading drawings…');
             // Local store is the source of truth — always works, cloud or not.
@@ -668,11 +698,12 @@ export class AppController {
                 this._renderDrawingList();
             }
 
-            const total = this._drawings.length;
+            const total   = this._drawings.length;
+            const changes = this._reconcileSummary();
             if (total === 0) {
                 this._setStatus(this._cloudOffline
                     ? 'Offline — connect to load drawings from the cloud.'
-                    : 'No drawings yet.');
+                    : `No drawings yet.${changes}`);
                 return;
             }
 
@@ -680,15 +711,41 @@ export class AppController {
             if (this._cloudOffline) {
                 this._setStatus(`${total} drawing(s) loaded locally (offline — cloud drawings unavailable).`);
             } else if (this._uploadError) {
-                this._setStatus(`${total} drawing(s) loaded (${pending} not yet in cloud — ${this._uploadError}).`);
+                this._setStatus(`${total} drawing(s) loaded (${pending} not yet in cloud — ${this._uploadError}).${changes}`);
             } else if (pending && cloudOn) {
-                this._setStatus(`${total} drawing(s) loaded (${pending} not yet in cloud).`);
+                this._setStatus(`${total} drawing(s) loaded (${pending} not yet in cloud).${changes}`);
             } else {
-                this._setStatus(`${total} drawing(s) loaded.`);
+                this._setStatus(`${total} drawing(s) loaded.${changes}`);
             }
         } catch (e) {
             this._setStatus('Could not load drawings: ' + e.message);
+        } finally {
+            this._cloudBusy        = false;
+            this._lastCloudRefresh = Date.now();
         }
+    }
+
+    // Human-readable tail describing what the last reconciliation changed, so a
+    // drawing appearing or vanishing after an edit elsewhere is explained rather
+    // than just happening.
+    _reconcileSummary() {
+        const { added = 0, updated = 0, removed = 0 } = this._reconcileStats ?? {};
+        const parts = [];
+        if (added)   parts.push(`${added} pulled from cloud`);
+        if (updated) parts.push(`${updated} updated from cloud`);
+        if (removed) parts.push(`${removed} deleted elsewhere, removed here`);
+        return parts.length ? ` (${parts.join(', ')})` : '';
+    }
+
+    // Re-check the cloud when the tab comes back to the foreground, so a rename
+    // or delete made in another session shows up without a manual "Sync now".
+    // Throttled, and skipped while a sync/live session is running.
+    async _maybeRefreshFromCloud() {
+        if (document.visibilityState !== 'visible') return;
+        if (!this._deviceInfo || this._cloudBusy || this._liveSession) return;
+        if (Date.now() - this._lastCloudRefresh < CLOUD_REFRESH_INTERVAL_MS) return;
+        if (!await this._isCloudOn()) return;
+        await this._loadStoredDrawings();
     }
 
     // Manual "Sync now": force a cloud pull + pending push, then reload.
@@ -704,7 +761,7 @@ export class AppController {
             // _loadStoredDrawings() already set -- only claim success when
             // nothing actually went wrong.
             if (!this._cloudOffline && !this._uploadError) {
-                this._setStatus('Cloud sync complete.');
+                this._setStatus('Cloud sync complete.' + this._reconcileSummary());
             }
         } catch (e) {
             this._setStatus('Cloud sync failed: ' + e.message);
@@ -713,33 +770,218 @@ export class AppController {
         }
     }
 
-    // Download cloud drawings with no local copy (synced from another device) and
-    // cache them in IndexedDB as already-uploaded. Local stays the render source.
+    // Two-way reconciliation between IndexedDB and the active cloud provider, so
+    // that a change made in another session (or on another device) shows up here:
+    //
+    //   cloud-only          -> downloaded and cached locally
+    //   both, cloud newer   -> local copy updated (a rename or an appended merge
+    //                          made elsewhere; `updatedAt` is the last-write-wins clock)
+    //   both, local newer   -> marked pending so _retryPendingUploads() pushes it
+    //   local-only, but it
+    //   was in this cloud   -> deleted remotely; the local copy is removed too
+    //
+    // The last rule is the one that can destroy data, so it is deliberately
+    // conservative: it runs only when the cloud listing came back COMPLETE, and
+    // only for records whose `cloudProvider` is the provider we just listed —
+    // otherwise switching provider (or a half-read listing) would wipe the local
+    // library. Records written before `cloudProvider` existed are re-uploaded
+    // rather than deleted — resurrecting a drawing once is recoverable, losing
+    // one isn't — and get stamped on the way through.
     async _reconcileCloud() {
+        const providerId = await cloudStore.activeProviderId(this._user.id);
+
+        // Deletions that could not reach the cloud earlier must be applied before
+        // the pull, or the pull downloads the drawing again and undoes them.
+        await this._flushPendingDeletes(providerId);
+        const stillPending = new Set(
+            this._getPendingDeletes()
+                .filter((p) => p.provider === providerId)
+                .map((p) => p.timestamp));
+
+        let cloud, incomplete;
         try {
-            const cloud = await cloudStore.getDrawingsByDevice(this._user.id, this._deviceInfo.id);
-            const known = new Set(this._drawings.map((d) => d.timestamp));
-            let added = 0;
-            for (const c of cloud) {
-                if (known.has(c.timestamp)) continue;
-                await localStore.saveDrawing({
-                    deviceId:    this._deviceInfo.id,
-                    timestamp:   c.timestamp,
-                    dimensions:  c.dimensions,
-                    strokes:     c.strokes,
-                    uploaded:    true,
-                    driveFileId: c.driveFileId ?? null,
-                });
-                added++;
-            }
-            if (added) {
-                this._drawings = await localStore.getDrawingsByDevice(this._deviceInfo.id);
-                this._renderDrawingList();
-            }
+            ({ drawings: cloud, incomplete } =
+                await cloudStore.fetchDrawings(this._user.id, this._deviceInfo.id));
         } catch (e) {
             console.warn('Cloud reconciliation failed:', e);
             if (isNetworkError(e)) this._cloudOffline = true;
+            return;
         }
+
+        const local     = await localStore.getDrawingsByDevice(this._deviceInfo.id);
+        const localByTs = new Map(local.map((d) => [d.timestamp, d]));
+        const cloudByTs = new Map(cloud.map((c) => [c.timestamp, c]));
+
+        let added = 0, updated = 0, removed = 0;
+
+        for (const c of cloud) {
+            if (stillPending.has(c.timestamp)) continue;   // deleted here, not yet in the cloud
+            const l  = localByTs.get(c.timestamp);
+            const cu = c.updatedAt ?? 0;
+
+            if (!l) {
+                await localStore.saveDrawing({
+                    deviceId:      this._deviceInfo.id,
+                    timestamp:     c.timestamp,
+                    dimensions:    c.dimensions,
+                    strokes:       c.strokes,
+                    name:          c.name ?? null,
+                    updatedAt:     cu,
+                    uploaded:      true,
+                    driveFileId:   c.driveFileId ?? null,
+                    cloudProvider: providerId,
+                });
+                added++;
+                continue;
+            }
+
+            const lu = l.updatedAt ?? 0;
+            if (cu > lu) {
+                await localStore.updateDrawing({
+                    ...l,
+                    dimensions:    c.dimensions,
+                    strokes:       c.strokes,
+                    name:          c.name ?? null,
+                    updatedAt:     cu,
+                    uploaded:      true,
+                    driveFileId:   c.driveFileId ?? l.driveFileId ?? null,
+                    cloudProvider: providerId,
+                });
+                updated++;
+            } else if (lu > cu) {
+                // Local edit the cloud hasn't seen — hand it to the push pass.
+                if (l.uploaded) {
+                    await localStore.updateDrawing({
+                        ...l,
+                        uploaded:      false,
+                        driveFileId:   c.driveFileId ?? l.driveFileId ?? null,
+                        cloudProvider: providerId,
+                    });
+                }
+            } else if (!l.uploaded || l.cloudProvider !== providerId ||
+                       l.driveFileId !== c.driveFileId) {
+                // Same content on both sides; only the local bookkeeping is stale
+                // (legacy record, or an upload whose result never got recorded).
+                await localStore.updateDrawing({
+                    ...l,
+                    uploaded:      true,
+                    driveFileId:   c.driveFileId ?? null,
+                    cloudProvider: providerId,
+                });
+            }
+        }
+
+        // Local drawings the cloud listing didn't mention. Skipped entirely when
+        // the listing was partial — neither branch below is safe against a cloud
+        // we only half read.
+        if (!incomplete) {
+            for (const l of local) {
+                if (cloudByTs.has(l.timestamp)) continue;
+                if (!l.uploaded) continue;             // pending; the push pass owns it
+
+                if (l.cloudProvider === providerId) {
+                    // We put it in THIS cloud and it is gone: deleted elsewhere.
+                    if (l.id != null) await localStore.deleteDrawing(l.id);
+                    if (this._getAutomergeTarget() === l.id) this._setAutomergeTarget(null);
+                    removed++;
+                } else {
+                    // It lives in a provider the user has switched away from (or
+                    // predates `cloudProvider` and can't be attributed at all).
+                    // Not a remote delete — hand it to the push pass so the newly
+                    // active provider ends up with the full library.
+                    await localStore.updateDrawing({ ...l, uploaded: false });
+                }
+            }
+        }
+
+        this._reconcileStats = { added, updated, removed };
+        this._drawings = await localStore.getDrawingsByDevice(this._deviceInfo.id);
+        this._renderDrawingList();
+    }
+
+    // ── Deferred cloud deletions ───────────────────────────────────────────────
+    //
+    // Deleting a drawing while the provider is unreachable can't remove the cloud
+    // copy there and then; without a record of the intent the next pull would
+    // download it again. Pending deletions are kept per device in localStorage
+    // and retried at the start of every reconciliation.
+
+    _pendingDeletesKey() { return `pandaink.pendingDeletes.${this._deviceInfo?.id}`; }
+
+    _getPendingDeletes() {
+        try {
+            const raw = localStorage.getItem(this._pendingDeletesKey());
+            const list = raw ? JSON.parse(raw) : [];
+            return Array.isArray(list) ? list : [];
+        } catch { return []; }
+    }
+
+    _setPendingDeletes(list) {
+        if (!list.length) localStorage.removeItem(this._pendingDeletesKey());
+        else localStorage.setItem(this._pendingDeletesKey(), JSON.stringify(list.slice(-200)));
+    }
+
+    _queuePendingDelete(entry) {
+        const list = this._getPendingDeletes()
+            .filter((p) => !(p.timestamp === entry.timestamp && p.provider === entry.provider));
+        list.push(entry);
+        this._setPendingDeletes(list);
+    }
+
+    // Retry queued deletions for the active provider. Entries for other providers
+    // are left untouched until that provider is active again.
+    async _flushPendingDeletes(providerId) {
+        const list = this._getPendingDeletes();
+        if (!list.length || !providerId) return;
+
+        const remaining = [];
+        for (const p of list) {
+            if (p.provider !== providerId) { remaining.push(p); continue; }
+            try {
+                await cloudStore.deleteDrawing(this._user.id, p.fileId);
+            } catch (e) {
+                console.warn('Deferred cloud delete failed, still queued:', e);
+                remaining.push(p);
+            }
+        }
+        this._setPendingDeletes(remaining);
+    }
+
+    // Remove a drawing's cloud copy, queueing the deletion when that isn't
+    // possible right now (offline, or the copy lives in a provider the user has
+    // since switched away from).
+    async _removeCloudCopy(drawing) {
+        if (!drawing.driveFileId) return;
+        const activeId = await cloudStore.activeProviderId(this._user.id);
+        // Legacy records carry no provider id — they can only have come from the
+        // provider that was active when they were uploaded, so assume this one.
+        const ownerId  = drawing.cloudProvider ?? activeId;
+
+        if (ownerId === activeId && await this._isCloudOn()) {
+            try {
+                await cloudStore.deleteDrawing(this._user.id, drawing.driveFileId);
+                return;
+            } catch (e) {
+                console.warn('Cloud delete failed — queued for retry:', e);
+            }
+        }
+        this._queuePendingDelete({
+            timestamp: drawing.timestamp,
+            fileId:    drawing.driveFileId,
+            provider:  ownerId,
+        });
+    }
+
+    // Record a successful cloud upload on the local copy.
+    async _markUploaded(drawing, up) {
+        const merged = {
+            ...drawing,
+            uploaded:      true,
+            driveFileId:   up.driveFileId,
+            cloudProvider: await cloudStore.activeProviderId(this._user.id),
+        };
+        await localStore.updateDrawing(merged);
+        return merged;
     }
 
     // Upload any locally-saved drawings that never made it to the cloud. Runs only
@@ -753,9 +995,7 @@ export class AppController {
             if (d.uploaded) continue;
             try {
                 const saved = await cloudStore.saveDrawing(this._user.id, d);
-                await localStore.updateDrawing({ ...d, uploaded: true, driveFileId: saved.driveFileId });
-                d.uploaded    = true;
-                d.driveFileId = saved.driveFileId;
+                Object.assign(d, await this._markUploaded(d, saved));
             } catch (e) {
                 console.warn('Pending upload retry failed:', e);
                 if (e.code === 'CAP_REACHED') { this._uploadError = e.message; break; }
@@ -784,6 +1024,12 @@ export class AppController {
         tabContent.innerHTML = '';
 
         if (this._drawings.length === 0) {
+            if (this._activeDrawingCanvas) {
+                this._activeDrawingCanvas.destroy();
+                this._activeDrawingCanvas = null;
+            }
+            this._activeTimestamp    = null;
+            this._activeDrawingIndex = -1;
             tabContent.innerHTML =
                 '<p class="placeholder">No drawings — connect your device and click Sync.</p>';
             return;
@@ -837,7 +1083,10 @@ export class AppController {
             tabList.appendChild(tab);
         });
 
-        this._selectTab(0);
+        // Keep the tab the user was looking at open — a background cloud refresh
+        // re-renders the list and must not yank them back to the first drawing.
+        const prev = this._drawings.findIndex((d) => d.timestamp === this._activeTimestamp);
+        this._selectTab(prev >= 0 ? prev : 0);
     }
 
     // A drawing's display label: its user-set name, or a formatted timestamp.
@@ -854,8 +1103,14 @@ export class AppController {
     }
 
     _selectTab(idx) {
+        // Remember how the outgoing drawing was zoomed/panned before it goes.
+        if (this._activeDrawingCanvas && this._activeTimestamp != null) {
+            this._viewByTs.set(this._activeTimestamp, this._activeDrawingCanvas.getView());
+        }
+
         this._activeDrawingIndex = idx;
         const drawing = this._drawings[idx];
+        this._activeTimestamp = drawing?.timestamp ?? null;
         const content = this._root.querySelector('#tab-content');
         content.innerHTML = '';
 
@@ -922,15 +1177,84 @@ export class AppController {
 
         const canvas = document.createElement('canvas');
         canvas.className = 'drawing-canvas';
+
+        const view = this._buildViewControls();
+        content.appendChild(view.el);
         content.appendChild(canvas);
 
-        const dc = new DrawingCanvas(canvas, drawing, this._orientation);
+        // The previous tab's canvas keeps a window resize listener — drop it.
+        if (this._activeDrawingCanvas) this._activeDrawingCanvas.destroy();
+
+        const dc = new DrawingCanvas(canvas, drawing, this._orientation, {
+            lineWidthFactor: this._lineWidth,
+            view:            this._viewByTs.get(drawing.timestamp),
+        });
         dc.render();
         this._activeDrawingCanvas = dc;
+        view.bind(dc);
 
         this._root.querySelectorAll('.tab-btn').forEach((b, i) => {
             b.classList.toggle('active', i === idx);
         });
+    }
+
+    // ── Canvas view controls (zoom + line width) ───────────────────────────────
+
+    _loadLineWidth() {
+        const stored = Number(localStorage.getItem('pandaink.lineWidth'));
+        if (!Number.isFinite(stored) || stored <= 0) return LINE_WIDTH_DEFAULT;
+        return Math.min(LINE_WIDTH_MAX, Math.max(LINE_WIDTH_MIN, stored));
+    }
+
+    _setLineWidth(factor) {
+        this._lineWidth = Math.min(LINE_WIDTH_MAX, Math.max(LINE_WIDTH_MIN, factor));
+        localStorage.setItem('pandaink.lineWidth', String(this._lineWidth));
+        // The setting is global — apply it to the live canvas too.
+        if (this._activeDrawingCanvas) this._activeDrawingCanvas.setLineWidthFactor(this._lineWidth);
+        if (this._liveCanvas)          this._liveCanvas.setLineWidthFactor(this._lineWidth);
+    }
+
+    // Zoom buttons and the line-width slider that sit above each drawing canvas.
+    // Returns { el, bind(canvas) } — the controls are built before the canvas so
+    // they can be inserted above it, then wired once it exists.
+    _buildViewControls() {
+        const el = document.createElement('div');
+        el.className = 'canvas-controls';
+        el.innerHTML = `
+<span class="canvas-ctl-group">
+  <button class="ctl-zoom-out" title="Zoom out">−</button>
+  <span class="zoom-level">100%</span>
+  <button class="ctl-zoom-in" title="Zoom in">+</button>
+  <button class="ctl-zoom-reset" title="Fit the drawing to the window">Reset</button>
+</span>
+<label class="canvas-ctl-group">
+  <span>Line width</span>
+  <input type="range" class="ctl-line-width"
+         min="${LINE_WIDTH_MIN}" max="${LINE_WIDTH_MAX}" step="0.1" value="${this._lineWidth}">
+  <span class="line-width-value">${this._lineWidth.toFixed(1)}×</span>
+</label>
+<span class="canvas-hint">Scroll to zoom · drag to pan · double-click to reset</span>`;
+
+        return {
+            el,
+            bind: (dc) => {
+                const zoomLabel = el.querySelector('.zoom-level');
+                const showZoom  = (z) => { zoomLabel.textContent = `${Math.round(z * 100)}%`; };
+                showZoom(dc.getZoom());
+                dc.onZoomChange = showZoom;
+
+                el.querySelector('.ctl-zoom-in')   .addEventListener('click', () => dc.zoomBy(1.25));
+                el.querySelector('.ctl-zoom-out')  .addEventListener('click', () => dc.zoomBy(1 / 1.25));
+                el.querySelector('.ctl-zoom-reset').addEventListener('click', () => dc.resetView());
+
+                const slider = el.querySelector('.ctl-line-width');
+                const value  = el.querySelector('.line-width-value');
+                slider.addEventListener('input', () => {
+                    this._setLineWidth(Number(slider.value));
+                    value.textContent = `${this._lineWidth.toFixed(1)}×`;
+                });
+            },
+        };
     }
 
     _closeTab(idx) {
@@ -943,14 +1267,10 @@ export class AppController {
         const drawing = this._drawings[idx];
         try {
             if (drawing.id != null) await localStore.deleteDrawing(drawing.id);
-            // Also remove the cloud copy if there is one and a provider is connected.
-            if (drawing.driveFileId && await this._isCloudOn()) {
-                try {
-                    await cloudStore.deleteDrawing(this._user.id, drawing.driveFileId);
-                } catch (e) {
-                    console.warn('Cloud delete failed (local copy removed):', e);
-                }
-            }
+            if (this._getAutomergeTarget() === drawing.id) this._setAutomergeTarget(null);
+            // Remove the cloud copy too — queued for retry if that can't happen
+            // now, so the next pull doesn't bring the drawing back.
+            await this._removeCloudCopy(drawing);
             this._drawings.splice(idx, 1);
             this._renderDrawingList();
         } catch (e) {
@@ -973,21 +1293,30 @@ export class AppController {
         if (input === null) return;   // cancelled
         const name = input.trim() || null;
         try {
-            drawing.name = name;
+            // The rename is an edit like any other: bump the last-write-wins
+            // clock and mark the record pending so the new name reaches the
+            // cloud — immediately if possible, on the next sync pass otherwise.
+            // (Leaving `uploaded` true on a failed push used to strand the name
+            // on this browser forever, which is exactly what other devices saw.)
+            drawing.name      = name;
+            drawing.updatedAt = Date.now();
+            drawing.uploaded  = false;
             await localStore.updateDrawing(drawing);
-            // Keep the cloud copy in sync (best-effort) so the name follows the
-            // drawing across devices.
-            if (drawing.driveFileId && await this._isCloudOn()) {
+
+            let pushed = false;
+            if (await this._isCloudOn()) {
                 try {
                     const up = await cloudStore.saveDrawing(this._user.id, drawing);
-                    await localStore.updateDrawing({ ...drawing, driveFileId: up.driveFileId });
+                    Object.assign(drawing, await this._markUploaded(drawing, up));
+                    pushed = true;
                 } catch (e) {
-                    console.warn('Cloud rename sync failed (local name saved):', e);
+                    console.warn('Cloud rename sync failed (local name saved, still pending):', e);
                 }
             }
             this._renderDrawingList();
             this._selectTab(idx);
-            this._setStatus(`Renamed to "${this._drawingLabel(drawing)}".`);
+            this._setStatus(`Renamed to "${this._drawingLabel(drawing)}".` +
+                (this._cloudOn && !pushed ? ' Not yet in the cloud — will retry on the next sync.' : ''));
         } catch (e) {
             this._setStatus('Rename failed: ' + e.message);
         }
@@ -1026,13 +1355,15 @@ export class AppController {
             while (existing.has(newTs)) newTs++;
 
             const merged = {
-                deviceId:    this._deviceInfo.id,
-                timestamp:   newTs,
-                dimensions:  selected[0].dimensions,
-                strokes:     selected.flatMap((d) => d.strokes),
-                uploaded:    false,
-                driveFileId: null,
-                name:        null,
+                deviceId:      this._deviceInfo.id,
+                timestamp:     newTs,
+                dimensions:    selected[0].dimensions,
+                strokes:       selected.flatMap((d) => d.strokes),
+                uploaded:      false,
+                driveFileId:   null,
+                cloudProvider: null,
+                name:          null,
+                updatedAt:     Date.now(),
             };
 
             const id = await localStore.saveDrawing(merged);
@@ -1044,7 +1375,7 @@ export class AppController {
             if (cloudOn) {
                 try {
                     const up = await cloudStore.saveDrawing(this._user.id, merged);
-                    await localStore.updateDrawing({ ...merged, uploaded: true, driveFileId: up.driveFileId });
+                    await this._markUploaded(merged, up);
                     mergedUploaded = true;
                 } catch (e) {
                     console.warn('Cloud upload of merged drawing failed (kept locally):', e);
@@ -1060,10 +1391,7 @@ export class AppController {
             const dropCloudOriginals = cloudOn && mergedUploaded;
             for (const d of selected) {
                 if (d.id != null) await localStore.deleteDrawing(d.id);
-                if (d.driveFileId && dropCloudOriginals) {
-                    try { await cloudStore.deleteDrawing(this._user.id, d.driveFileId); }
-                    catch (e) { console.warn('Cloud delete failed during merge:', e); }
-                }
+                if (dropCloudOriginals) await this._removeCloudCopy(d);
                 if (this._getAutomergeTarget() === d.id) this._setAutomergeTarget(null);
             }
 

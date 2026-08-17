@@ -7,6 +7,33 @@ Format: `## Unreleased` for pending changes; `## <version> — <date>` for relea
 
 ## Unreleased
 
+- feat: each drawing tab now has canvas view controls — zoom (buttons, mouse wheel about the
+  cursor, drag to pan, double-click to reset, 0.5×–16×) and a line-width slider (0.2×–3.0×,
+  remembered across sessions and applied to the live canvas too). Strokes keep their
+  on-screen thickness as you zoom, so zooming in makes handwriting bigger without making the
+  ink fatter, and the canvas now renders at the device pixel ratio.
+- fix: strokes were rendered too thick to read dense handwriting — loops filled in. The
+  default line width is now 0.6× the previous weight, adjustable with the new slider.
+- fix: renaming a drawing only ever changed it on that browser. The rename now bumps the
+  record's `updatedAt` clock and marks it pending, so it is re-uploaded (and retried on the
+  next sync if the upload fails, instead of silently staying local forever), and other
+  devices adopt the newer name when they reconcile. Cloud-only drawings pulled down on a
+  second device also keep their name — the pull used to drop it.
+- fix: cloud sync is now two-way. A drawing deleted in another session is removed here
+  instead of lingering (and being re-uploaded, resurrecting it), and a drawing edited
+  elsewhere refreshes locally, so two devices no longer end up with a mix of stale local and
+  cloud copies. The destructive half is deliberately conservative: local copies are only
+  removed when the provider returned a complete listing and the record was known to be in
+  that same provider, so a half-read listing or a provider switch can't wipe the library.
+- fix: deleting a drawing while the cloud provider is unreachable is remembered and retried
+  on the next sync; until it succeeds the drawing is not pulled back down.
+- fix: switching storage provider left earlier drawings behind in the old one — they are now
+  queued for upload to the newly selected provider.
+- fix: the cloud is re-checked when the tab regains focus (throttled to once a minute), so
+  changes made on another device appear without pressing "Sync now".
+- fix: the service worker served cached JS modules cache-first under a fixed cache name, so
+  a returning visitor kept running the modules cached on their first visit and never received
+  app fixes. Static assets now use stale-while-revalidate and the cache tag was bumped.
 - fix: the free-plan 10-drawing cap could be exceeded. The server-side trigger
   (`005_storage_cap.sql`) skipped the cap entirely for any user without a `profiles` row —
   their `plan` read back as null and null was treated as Pro — so such an account could upload

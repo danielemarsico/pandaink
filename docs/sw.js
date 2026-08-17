@@ -10,11 +10,17 @@
 //     always go straight to the network — the SW never caches or blocks them.
 //   • Navigations use network-first (so a new deploy shows up immediately, with
 //     the cached shell as an offline fallback).
-//   • Other static assets (JS/CSS/icons) use cache-first with runtime
-//     population, so repeat loads are instant.
+//   • Other static assets (JS/CSS/icons) use stale-while-revalidate: the cached
+//     copy is served immediately (instant repeat loads) while a fresh copy is
+//     fetched in the background for the NEXT load. Plain cache-first pinned
+//     every visitor to the modules cached on their first visit — a deploy fixing
+//     a bug in docs/ui/*.js never reached them.
 //   • version.json is always fetched fresh so the build stamp stays accurate.
+//
+// Bump CACHE on any release that must invalidate what visitors already hold;
+// `activate` deletes every cache whose name doesn't match.
 
-const CACHE = 'pandaink-shell-v1';
+const CACHE = 'pandaink-shell-v2';
 
 // Minimal shell guaranteed to be available offline after first visit. The rest
 // of the modules are cached lazily as they're fetched.
@@ -68,10 +74,15 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Other static assets: cache-first, populate on miss.
-  event.respondWith(
-    caches.match(req).then((cached) =>
-      cached || fetch(req).then((res) => cachePut(req, res))
-    )
-  );
+  // Other static assets: stale-while-revalidate — serve the cached copy at once
+  // and refresh it in the background so the next load picks up a new deploy.
+  event.respondWith((async () => {
+    const cached  = await caches.match(req);
+    const network = fetch(req).then((res) => cachePut(req, res));
+    if (cached) {
+      event.waitUntil(network.catch(() => {}));
+      return cached;
+    }
+    return network;
+  })());
 });

@@ -15,8 +15,16 @@
 //     'devices'   — keyPath: 'id' (the Web Bluetooth device.id)
 //
 // Drawing record:
-//   { id?, deviceId, timestamp, dimensions, strokes, uploaded?, driveFileId? }
-//   strokes: array of arrays of { x, y, p }
+//   { id?, deviceId, timestamp, dimensions, strokes, name?, updatedAt?,
+//     uploaded?, driveFileId?, cloudProvider? }
+//   strokes:       array of arrays of { x, y, p }
+//   name:          optional user label (see rename)
+//   updatedAt:     ms epoch of the last edit; the last-write-wins clock used to
+//                  reconcile this record against the cloud copy. Records written
+//                  before this field existed read back as 0 (older than anything).
+//   cloudProvider: id of the provider `driveFileId` belongs to ('supabase' /
+//                  'google_drive' / 'dropbox') — a drawing absent from a
+//                  *different* provider was never there, it was not deleted.
 //
 // Device record:
 //   { id, name, uuid, protocol }

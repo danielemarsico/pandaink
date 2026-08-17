@@ -15,12 +15,14 @@ export class LiveCanvas {
      * @param {object} opts
      * @param {string} [opts.orientation='portrait']
      * @param {number[]} [opts.dimensions=[21000,14800]] - Device width/height in device units.
+     * @param {number} [opts.lineWidthFactor=1] - Stroke thickness multiplier.
      */
     constructor(el, opts = {}) {
         this._el          = el;
         this._ctx         = el.getContext('2d');
         this._orientation = (opts.orientation || 'portrait').toLowerCase();
         this._dimensions  = opts.dimensions || [21000, 14800];
+        this._widthFactor = opts.lineWidthFactor ?? 1;
 
         this._currentSegment = [];  // points in the current pen-down stroke
         this._segments       = [];  // all completed segments
@@ -36,6 +38,12 @@ export class LiveCanvas {
 
     setDimensions(dimensions) {
         this._dimensions = dimensions;
+        this._redraw();
+    }
+
+    /** Stroke thickness multiplier — shares the drawing canvas's setting. */
+    setLineWidthFactor(factor) {
+        this._widthFactor = factor;
         this._redraw();
     }
 
@@ -122,7 +130,7 @@ export class LiveCanvas {
         const [x2, y2] = this._transform(p2.x, p2.y);
 
         const pressure  = ((p1.p + p2.p) / 2) / NORMALIZED_RANGE;
-        const lineWidth = pressure * 2 + 0.5;
+        const lineWidth = (pressure * 2 + 0.5) * this._widthFactor;
 
         ctx.beginPath();
         ctx.moveTo(x1, y1);
