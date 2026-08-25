@@ -345,6 +345,15 @@ cloud copy, and the next pull would download it straight back. The intent is que
 retried at the start of every reconciliation, and honoured in the meantime — a queued
 timestamp is never pulled back down.
 
+**One reconciliation pass at a time.** The table above assumes at most one local record per
+timestamp; IndexedDB has no unique constraint enforcing that, so a second reconciliation pass
+starting before the first one has written anything (e.g. `onAuthStateChange` replaying the
+current session right after `mount()` already started loading) would each see the same
+cloud-only drawing as "not local yet" and both insert it. `_loadStoredDrawings()`
+(`app_controller.js`) is serialized — overlapping callers share one in-flight pass — and every
+load runs a dedup pass over the local store first, collapsing any duplicate timestamp back to
+its most authoritative record (uploaded over pending, then most recently edited).
+
 ### Distinguishing local-only vs cloud-synced drawings
 
 Each drawing tab carries a **cloud badge** so the user can tell at a glance where a drawing
