@@ -74,6 +74,7 @@ export class AppController {
         this._profilePanel = null;
         this._cloudBusy   = false;   // a cloud pass is already running
         this._lastCloudRefresh = 0;
+        this._loadInFlight = null;   // in-flight _loadStoredDrawings() promise, so overlapping callers share one pass
 
         this._ble.ondisconnect = () => this._onDisconnect();
     }
@@ -662,7 +663,26 @@ export class AppController {
 
     // ── Drawing tabs ─────────────────────────────────────────────────────────
 
-    async _loadStoredDrawings() {
+    // Entry point used by every caller (mount, connect, manual sync, focus
+    // refresh). Serialized: mount() both calls this directly AND subscribes to
+    // onAuthStateChange, which fires immediately for an already-known session
+    // (supabase-js replays the current session to a fresh listener) — so on a
+    // brand-new browser/device this function is naturally invoked twice back to
+    // back. Without serialization both calls read the (empty) local IndexedDB
+    // before either has written anything, both find each cloud drawing "not yet
+    // local", and both `add()` it — producing two local records for the same
+    // drawing (the duplicate-after-connecting-from-a-new-device bug). Sharing one
+    // in-flight promise means the second caller just awaits the first pass's
+    // result instead of racing it.
+    _loadStoredDrawings() {
+        if (this._loadInFlight) return this._loadInFlight;
+        this._loadInFlight = this._loadStoredDrawingsImpl().finally(() => {
+            this._loadInFlight = null;
+        });
+        return this._loadInFlight;
+    }
+
+    async _loadStoredDrawingsImpl() {
         if (!this._deviceInfo) return;
         this._cloudOffline  = false;
         this._uploadError   = null;
@@ -671,7 +691,8 @@ export class AppController {
         try {
             this._setStatus('Loading drawings…');
             // Local store is the source of truth — always works, cloud or not.
-            this._drawings = await localStore.getDrawingsByDevice(this._deviceInfo.id);
+            this._drawings = await this._dedupeLocalDrawings(
+                await localStore.getDrawingsByDevice(this._deviceInfo.id));
             this._renderDrawingList();
 
             const cloudOn = await this._isCloudOn();
@@ -723,6 +744,42 @@ export class AppController {
             this._cloudBusy        = false;
             this._lastCloudRefresh = Date.now();
         }
+    }
+
+    // Self-heals duplicate local records that share the same timestamp (RULEBOOK
+    // treats timestamp as the unique key "per timestamp" — reconciliation's
+    // localByTs map assumes at most one local row per timestamp). Duplicates can
+    // exist from before the _loadStoredDrawings() race above was closed, so this
+    // cleanup runs unconditionally on every load, not just as a one-time
+    // migration. Keeps the most authoritative copy — uploaded over pending, then
+    // most recently edited, then the oldest (lowest id) row — and deletes the
+    // rest from IndexedDB.
+    async _dedupeLocalDrawings(list) {
+        const byTs = new Map();
+        for (const d of list) {
+            const group = byTs.get(d.timestamp);
+            if (group) group.push(d); else byTs.set(d.timestamp, [d]);
+        }
+
+        const deduped = [];
+        for (const group of byTs.values()) {
+            if (group.length === 1) { deduped.push(group[0]); continue; }
+            group.sort((a, b) => {
+                if (a.uploaded !== b.uploaded) return a.uploaded ? -1 : 1;
+                const au = a.updatedAt ?? 0, bu = b.updatedAt ?? 0;
+                if (au !== bu) return bu - au;
+                return (a.id ?? 0) - (b.id ?? 0);
+            });
+            const [keep, ...drop] = group;
+            for (const d of drop) {
+                if (d.id != null) await localStore.deleteDrawing(d.id);
+            }
+            if (this._getAutomergeTarget() != null && drop.some((d) => d.id === this._getAutomergeTarget())) {
+                this._setAutomergeTarget(keep.id);
+            }
+            deduped.push(keep);
+        }
+        return deduped.sort((a, b) => a.timestamp - b.timestamp);
     }
 
     // Human-readable tail describing what the last reconciliation changed, so a

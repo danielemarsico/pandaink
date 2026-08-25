@@ -7,6 +7,13 @@ Format: `## Unreleased` for pending changes; `## <version> — <date>` for relea
 
 ## Unreleased
 
+- fix: connecting from a new browser/device right after sign-in could show the same synced
+  drawing twice. `mount()` loads the drawing list directly and also gets an immediate replay
+  of the current session from `onAuthStateChange`, so on a fresh (empty) local store both
+  paths reconciled the cloud at once — each saw the drawing as "not local yet" and both
+  inserted a copy. `_loadStoredDrawings()` is now serialized so overlapping callers share one
+  in-flight pass, and a self-healing cleanup collapses any duplicate local records left over
+  from before this fix (or from any other repeated-add race) back down to one.
 - feat: each drawing tab now has canvas view controls — zoom (buttons, mouse wheel about the
   cursor, drag to pan, double-click to reset, 0.5×–16×) and a line-width slider (0.2×–3.0×,
   remembered across sessions and applied to the live canvas too). Strokes keep their
