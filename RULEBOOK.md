@@ -488,12 +488,17 @@ Auth runs on **Supabase Auth**, client-side (no custom auth server). Methods, al
 - **Email/password** — sign up (with `full_name` metadata + email-confirmation redirect) and
   sign in. A DB trigger creates the `profiles` row on signup.
 - **Google** and **GitHub** — Supabase social login (`signInWithOAuth`). Each requires the
-  provider enabled in the Supabase dashboard; the GitHub OAuth App is still to be configured.
-- **Password reset** — `resetPasswordForEmail` exists in code; needs a UI entry point
-  ("Forgot password?" on the login form + a recovery handler).
-- **Account deletion** — currently a stub (only signs out). Real deletion needs a privileged
-  call (`auth.admin.deleteUser`) and so must run on the **Cloudflare Worker** with the Supabase
-  service-role key; the frontend calls that Worker endpoint.
+  provider enabled in the Supabase dashboard. Google is enabled and working; the **GitHub
+  OAuth App is still to be created and enabled** (the button exists and will fail until then).
+- **Password reset** — implemented end to end: a "Forgot password?" link on the login form
+  (`app_controller.js`) calls `resetPasswordForEmail`, and `onPasswordRecovery` opens a
+  recovery panel that calls `updatePassword`.
+- **Account deletion** — implemented. `deleteAccount()` in `auth_manager.js` calls the
+  **Cloudflare Worker**'s `POST /account/delete`, which performs the privileged
+  `auth.admin.deleteUser` with the Supabase service-role key, authenticated by the caller's
+  access token. Deleting the auth user cascades to profiles / devices / storage_tokens via FK.
+  Without a configured Worker the call returns a clear error rather than silently signing out.
+  Not yet exercised end to end — see `TASKS.md` → "Ready to Test".
 
 The Google **Drive** OAuth in `docs/auth/storage_oauth.js` is separate from Supabase social
 login (it grants Drive `appdata` access, not app login). Its `client_secret` moves to the

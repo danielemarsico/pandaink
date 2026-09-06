@@ -7,6 +7,18 @@ Format: `## Unreleased` for pending changes; `## <version> — <date>` for relea
 
 ## Unreleased
 
+- docs: correct `TASKS.md` and `RULEBOOK.md`, which described work that is already done.
+  The Cloudflare Worker is deployed and live (`/health` returns ok, `WORKER_BASE_URL` is set),
+  so the four items listed as "blocked on Worker deployment" — Google Drive connect, account
+  deletion, and live sharing — are not blocked, only untested; they move to a "Ready to Test"
+  section. Also fixes three stale claims in `RULEBOOK.md`: account deletion is fully
+  implemented via the Worker (not "a stub that only signs out"), password reset has a real UI
+  entry point ("Forgot password?" plus a recovery panel), and the GitHub OAuth note now says
+  plainly that the button exists and fails until the OAuth App is created. Adds that GitHub
+  OAuth App as a real admin task — `TASKS.md` referenced it as "see Manual Actions" while no
+  such entry existed — and de-duplicates the Google-verification item, which was listed twice.
+  `DROPBOX_CLIENT_ID` is now the only remaining config gap.
+
 - fix: connecting from a new browser/device right after sign-in could show the same synced
   drawing twice. `mount()` loads the drawing list directly and also gets an immediate replay
   of the current session from `onAuthStateChange`, so on a fresh (empty) local store both
