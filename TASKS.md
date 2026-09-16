@@ -175,7 +175,15 @@ sync would fail on real hardware even after the GATT/notify fixes.
       both failed, in two different ways, suggesting the real constraint is
       event-driven rather than timing-driven.
 
-      **Next approach to try**: drive the reconnect off the actual
+      **Attempt 3 (in test)**: no reconnect at all. `BleManager.authenticated`
+      is set when CONNECT succeeds on the current link (reset on connect /
+      disconnect / `gattserverdisconnected`); `connectAuthorized()` in
+      `sync.js` treats INVALID_STATE on an already-authenticated link as
+      "already connected" and proceeds (same as `wacom_win.py:593` in live
+      mode). Test: sync, draw, sync again without reloading. If a later
+      command fails instead, fall back to the approach below.
+
+      **Fallback approach**: drive the reconnect off the actual
       `gattserverdisconnected` event — call `gatt.disconnect()`, `await` a
       one-shot listener for `gattserverdisconnected` actually firing (not a
       `setTimeout`), *then* call `gatt.connect()`. Also worth checking whether

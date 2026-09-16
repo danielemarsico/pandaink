@@ -19,6 +19,8 @@ export class BleManager {
         this._notifyHandlers = new Map();
         this._disconnectHandler = null;
         this.ondisconnect = null;
+        // True once the Wacom CONNECT handshake succeeded on the current GATT link.
+        this.authenticated = false;
     }
 
     async connect() {
@@ -35,7 +37,9 @@ export class BleManager {
             ],
         });
 
+        this.authenticated = false;
         this._disconnectHandler = () => {
+            this.authenticated = false;
             if (this.ondisconnect) this.ondisconnect();
         };
         this._device.addEventListener('gattserverdisconnected', this._disconnectHandler);
@@ -87,6 +91,7 @@ export class BleManager {
                 this._device.gatt.disconnect();
             }
         }
+        this.authenticated = false;
         this._server = null;
         this._service = null;
         this._services = [];

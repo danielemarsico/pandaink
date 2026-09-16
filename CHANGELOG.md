@@ -21,6 +21,11 @@ Format: `## Unreleased` for pending changes; `## <version> — <date>` for relea
 - chore: set `DROPBOX_CLIENT_ID` in `docs/config.js` — the Dropbox App Console app is
   created (App folder scope, PKCE, redirect URI pointed at `app.html`), so Dropbox is now
   selectable as a Pro storage provider.
+- fix: a second sync in the same session no longer hangs on `CONNECT INVALID_STATE`
+  (pending hardware confirmation). On a link that already completed the CONNECT handshake,
+  the device answers a repeat CONNECT with INVALID_STATE meaning "already connected", not
+  "press the button" — the sync now proceeds instead of waiting 25s, with no BLE disconnect.
+  A first CONNECT on a fresh link still waits for the button as before.
 - revert: reverted two attempted fixes for the "second sync in the same session hangs on
   `CONNECT INVALID_STATE`" bug (`BleManager.reconnectGatt()` + retrying service discovery on
   reconnect). On real hardware, forcing a GATT disconnect/reconnect before each sync made
