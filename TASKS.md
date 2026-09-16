@@ -122,22 +122,66 @@ sync would fail on real hardware even after the GATT/notify fixes.
       fixes reverted**: the second sync in the same browser session hangs
       forever on `CONNECT INVALID_STATE` no matter how many times the device
       button is pressed; only a full page reload + reconnect recovers it
-      (current workaround). Root cause: the device's CONNECT handshake only
-      re-arms after the physical BLE link actually drops, but
-      `app_controller.js` reuses the existing GATT session for every sync
-      after the first (unlike the Python reference, which disconnects after
-      every fetch — `base_win.py:229`).
-      Tried and reverted: a `BleManager.reconnectGatt()` that forces a
-      disconnect/reconnect before each sync (with a fixed settle delay, later
-      with retried service discovery too) — on real hardware this made it
-      *worse*: clicking Sync disconnected the device outright instead of
-      hanging. A fixed-delay GATT bounce is the wrong shape for this fix.
+      (current workaround, confirmed working). Symptom log (first sync
+      succeeds fully — 191 chunks, CRC match, DELETE_OLDEST acked — then the
+      second sync's CONNECT gets `← CONNECT reply [b3 01 02]` repeatedly,
+      counting down 25s → 0 with no change no matter when the device button
+      is pressed).
+
+      Root cause: the device's CONNECT handshake only re-arms after the
+      physical BLE link actually drops, but `app_controller.js`'s
+      `_ensureBleConnected()` / `_cmdSync()` reuses the existing GATT session
+      for every sync after the first (unlike the Python reference, which
+      disconnects after every fetch — `base_win.py:229`
+      `bluez_device.disconnect_device()` in `_on_fetching_finished()`, then
+      reconnects fresh via `_connect_device()` next time).
+
+      **Attempt 1 (commit `adf1e43`, reverted in `329c24e`)**: added
+      `BleManager.reconnectGatt()` — `this._device.gatt.disconnect()`, a fixed
+      300ms `setTimeout` settle delay, then `gatt.connect()` + re-discover
+      services — called from `_cmdSync()` before every sync when
+      `this._ble.isConnected()` is already true (reuses the already-picked
+      `BluetoothDevice`, no browser chooser re-prompt). Result on real
+      hardware: the *second* sync now failed immediately with `Sync error:
+      Characteristic 6e400003-b5a3-f393-e0a9-e50e24dcca9e not found in any
+      discovered service` (6e400003 = `NORDIC_UART_CHRC_RX_UUID`, the command
+      reply channel `exchange()` subscribes to in `sync.js`).
+
+      **Attempt 2 (commit `6c5b536`, reverted in same `329c24e`)**: diagnosed
+      attempt 1 as a race — right after a fast disconnect/reconnect, Chrome's
+      GATT service cache hadn't settled, so `getPrimaryService()` for the
+      Nordic UART service was throwing transiently and being silently
+      swallowed by `_setupServer()`'s per-service `try {} catch {}` (meant only
+      for "device doesn't expose this optional service"), leaving `_services`
+      without the command channel. Fix: bumped the settle delay to 500ms,
+      added up to 5 retries (250ms apart) specifically for the required Nordic
+      UART service, and made `_setupServer()` throw a clear error if it's
+      still missing instead of failing later inside an unrelated
+      characteristic lookup. Result on real hardware: **worse** — clicking
+      "Sync drawings" now visibly disconnected the device outright (per user
+      report: "now if i click on sync drawings it disconnect"), instead of
+      hanging on INVALID_STATE. Not diagnosed further before reverting — could
+      be the 500ms `gatt.disconnect()` → `gatt.connect()` round-trip itself
+      racing the device's own advertising/reconnect window rather than the
+      service-cache settle time, or the retry loop's repeated
+      `getPrimaryService()` calls somehow triggering a second disconnect.
+
+      **Conclusion**: a fixed-delay GATT disconnect/reconnect bounce is the
+      wrong shape for this fix — two different delay values (300ms, 500ms)
+      both failed, in two different ways, suggesting the real constraint is
+      event-driven rather than timing-driven.
+
       **Next approach to try**: drive the reconnect off the actual
-      `gattserverdisconnected` event (wait for it to actually fire after
-      `gatt.disconnect()`, rather than a fixed timeout) before calling
-      `gatt.connect()` again — and validate each iteration against the real
-      Folio before considering it done, not just against the Python
-      reference.
+      `gattserverdisconnected` event — call `gatt.disconnect()`, `await` a
+      one-shot listener for `gattserverdisconnected` actually firing (not a
+      `setTimeout`), *then* call `gatt.connect()`. Also worth checking whether
+      the device needs to be given time to re-enter its advertising state
+      before a fresh `gatt.connect()` will succeed (i.e. maybe also wait for a
+      `advertisementreceived` event or a short additional delay after the
+      disconnect event, not immediately upon it). Validate each iteration
+      against the real Folio before considering it done — both attempts above
+      looked correct by inspection and against the Python reference, but both
+      failed differently on real hardware.
 - [ ] **C2 — Slate stroke-file parser** (`sync.js` `parseStrokeData()`): sync a
       real Folio drawing and compare visually against the same drawing synced
       by the Python GUI — stroke count, shape, no corner spikes at 65535.
