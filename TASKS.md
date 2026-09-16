@@ -121,7 +121,7 @@ sync would fail on real hardware even after the GATT/notify fixes.
 
 - [x] **C1a — sync 1 drawing**: confirmed against the real Folio — 191 chunks,
       3250 bytes, device CRC matched computed CRC, 9 strokes / 896 points parsed.
-- [ ] **C1b — sync with 0 drawings on device**: still untested.
+- [x] **C1b — sync with 0 drawings on device**: confirmed working on the real Folio.
 - [x] **C1c — sync several in one session — fixed, confirmed on the Folio**
       (commit `6c3ea52`). Symptom was: the second sync in the same browser
       session hung on `CONNECT INVALID_STATE` (`[b3 01 02]`) no matter when
