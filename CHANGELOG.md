@@ -22,22 +22,11 @@ Format: `## Unreleased` for pending changes; `## <version> — <date>` for relea
   created (App folder scope, PKCE, redirect URI pointed at `app.html`), so Dropbox is now
   selectable as a Pro storage provider.
 - fix: a second sync in the same session no longer hangs on `CONNECT INVALID_STATE`
-  (pending hardware confirmation). The Folio only accepts a new sync on a fresh BLE link, so
+  (confirmed on the Bamboo Folio). The Folio only accepts a new sync on a fresh BLE link, so
   the app now closes the link when a sync finishes (as the Python app does) and the next Sync
   reopens it without showing the device picker, retrying for up to 20s if the device drops
   the link while it settles. Between syncs the connection dot shows "not connected"; that is
   expected.
-- revert: reverted two attempted fixes for the "second sync in the same session hangs on
-  `CONNECT INVALID_STATE`" bug (`BleManager.reconnectGatt()` + retrying service discovery on
-  reconnect). On real hardware, forcing a GATT disconnect/reconnect before each sync made
-  things worse — clicking Sync now disconnected the device outright instead of hanging.
-  `docs/ble/ble_manager.js` and `docs/ui/app_controller.js` are back to the last known-working
-  behavior: a second sync in the same session still requires a page reload + reconnect as a
-  workaround. Root cause (the device's CONNECT handshake only re-arming after a real BLE link
-  drop) still stands; the fix needs a different approach than a fixed-delay GATT bounce —
-  likely driven off the actual `gattserverdisconnected` event rather than a timeout, and
-  needs to be validated against real hardware before landing again, not just reasoned about
-  from the Python reference.
 
 - fix: connecting from a new browser/device right after sign-in could show the same synced
   drawing twice. `mount()` loads the drawing list directly and also gets an immediate replay
