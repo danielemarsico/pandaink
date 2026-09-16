@@ -526,7 +526,20 @@ export class AppController {
         btn.disabled = true;
 
         try {
-            await this._ensureBleConnected();
+            if (this._ble.isConnected()) {
+                // The device's own CONNECT handshake only re-arms after the
+                // physical BLE link actually drops -- reusing an already-open
+                // GATT session (as _ensureBleConnected() would) makes it reject
+                // every retry with INVALID_STATE forever, regardless of button
+                // presses. Bounce the GATT connection (no device picker re-prompt,
+                // reuses the already-authorized device) before every sync after
+                // the first. Mirrors base_win.py's disconnect_device() after each
+                // fetch in the Python reference.
+                await this._ble.reconnectGatt();
+            } else {
+                await this._ble.connect();
+            }
+            this._updateConnDot();
 
             const cloudOn      = await this._isCloudOn();
             const providerName = cloudOn ? await cloudStore.activeProviderName(this._user.id) : null;

@@ -21,6 +21,14 @@ Format: `## Unreleased` for pending changes; `## <version> — <date>` for relea
 - chore: set `DROPBOX_CLIENT_ID` in `docs/config.js` — the Dropbox App Console app is
   created (App folder scope, PKCE, redirect URI pointed at `app.html`), so Dropbox is now
   selectable as a Pro storage provider.
+- fix: syncing a second drawing in the same browser session hung forever on
+  `CONNECT INVALID_STATE`, no matter how many times the device's button was pressed (only a
+  full page reload recovered). The device's own CONNECT handshake only re-arms after the
+  physical BLE link actually drops; the web app was reusing the existing GATT session for
+  every sync after the first instead of reconnecting, unlike the Python reference which
+  disconnects after every fetch. Adds `BleManager.reconnectGatt()` (bounces the GATT
+  connection without re-showing the browser's device picker) and calls it before each sync
+  after the first.
 
 - fix: connecting from a new browser/device right after sign-in could show the same synced
   drawing twice. `mount()` loads the drawing list directly and also gets an immediate replay

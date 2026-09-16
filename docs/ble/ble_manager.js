@@ -40,6 +40,36 @@ export class BleManager {
         };
         this._device.addEventListener('gattserverdisconnected', this._disconnectHandler);
 
+        await this._setupServer();
+
+        return {
+            name: this._device.name,
+            // Web Bluetooth does not expose MAC addresses directly; use id as proxy
+            address: this._device.id,
+        };
+    }
+
+    // Ports base_win.py's disconnect_device() + reconnect cycle between fetches.
+    // The Wacom protocol's own CONNECT command (opcode 0xe6) only re-arms once
+    // the physical BLE link has actually dropped -- resending it over an
+    // already-open GATT session just gets rejected with INVALID_STATE forever,
+    // no matter how many times the device's button is pressed. A full page
+    // reload "fixes" this only because it forces a brand-new GATT connection;
+    // this does the same thing without reopening the device picker (reuses the
+    // already-authorized `this._device`, unlike connect()'s requestDevice()).
+    async reconnectGatt() {
+        if (!this._device) throw new Error('No device to reconnect to — call connect() first.');
+        if (this._device.gatt.connected) {
+            this._device.gatt.disconnect();
+            // Give the OS BLE stack a moment to actually tear down the link
+            // before re-establishing it -- an immediate gatt.connect() can
+            // silently reuse the stale session on some platforms.
+            await new Promise((r) => setTimeout(r, 300));
+        }
+        await this._setupServer();
+    }
+
+    async _setupServer() {
         // Characteristic/notify-handler references are tied to the GATT
         // session they were retrieved from -- they go stale on reconnect
         // (even to the same device) and must not be reused, or later calls
@@ -69,12 +99,6 @@ export class BleManager {
         }
         // Keep the Nordic UART service reference for callers that expect it.
         this._service = this._services[0] ?? null;
-
-        return {
-            name: this._device.name,
-            // Web Bluetooth does not expose MAC addresses directly; use id as proxy
-            address: this._device.id,
-        };
     }
 
     async disconnect() {
