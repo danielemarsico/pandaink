@@ -16,7 +16,7 @@ export const WORKER_BASE_URL = 'https://pandaink-api.marsicod.workers.dev';
 
 // Public Dropbox app key (App Console → your app → "App key").
 // The Dropbox app secret is NOT here — it lives in the Worker.
-export const DROPBOX_CLIENT_ID = '';
+export const DROPBOX_CLIENT_ID = 'r7790mlz7n6rfpk';
 
 // Ko-fi one-time purchase link that grants Pro ($5). Create a Ko-fi Shop item
 // and paste its share link here, e.g. https://ko-fi.com/s/xxxxxxxxxx

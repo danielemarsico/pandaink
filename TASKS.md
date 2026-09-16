@@ -12,7 +12,7 @@ hardware tests that need the real Folio.
 | Cloudflare Worker | ✅ Deployed — `https://pandaink-api.marsicod.workers.dev`, `/health` returns `{"ok":true}` |
 | `WORKER_BASE_URL` | ✅ Set in `docs/config.js` |
 | `KOFI_PRO_URL` | ✅ Set |
-| `DROPBOX_CLIENT_ID` | ❌ **Empty** — the one remaining config gap |
+| `DROPBOX_CLIENT_ID` | ✅ Set in `docs/config.js` |
 
 > **What the Worker is for**, since none of it is on the email-login +
 > Supabase-Storage path that already works: Google Drive OAuth token exchange
@@ -28,13 +28,13 @@ hardware tests that need the real Folio.
 These need external dashboards and can only be done by the project owner.
 Each is independent unless noted.
 
-### Dropbox — the only thing still blocking code paths
-- [ ] **Create a Dropbox app** (App Console → Scoped access → App folder),
+### Dropbox
+- [x] **Create a Dropbox app** (App Console → Scoped access → App folder),
       permissions `files.content.write/read`, `files.metadata.read`; add
       redirect URI `https://danielemarsico.github.io/pandaink/app.html`.
       Copy the **App key** into `docs/config.js` → `DROPBOX_CLIENT_ID`.
       (The app *secret* is not needed in the frontend — Dropbox uses
-      secretless PKCE, see `docs/auth/dropbox_oauth.js`.)
+      secretless PKCE, see `docs/auth/dropbox_oauth.js`.) — done, ready to test below.
 
 ### GitHub OAuth App
 - [ ] **Create a GitHub OAuth App** and enable the GitHub provider in the

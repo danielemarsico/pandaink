@@ -18,6 +18,9 @@ Format: `## Unreleased` for pending changes; `## <version> — <date>` for relea
   OAuth App as a real admin task — `TASKS.md` referenced it as "see Manual Actions" while no
   such entry existed — and de-duplicates the Google-verification item, which was listed twice.
   `DROPBOX_CLIENT_ID` is now the only remaining config gap.
+- chore: set `DROPBOX_CLIENT_ID` in `docs/config.js` — the Dropbox App Console app is
+  created (App folder scope, PKCE, redirect URI pointed at `app.html`), so Dropbox is now
+  selectable as a Pro storage provider.
 
 - fix: connecting from a new browser/device right after sign-in could show the same synced
   drawing twice. `mount()` loads the drawing list directly and also gets an immediate replay
