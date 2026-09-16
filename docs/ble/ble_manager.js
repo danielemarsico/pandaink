@@ -63,8 +63,10 @@ export class BleManager {
             this._device.gatt.disconnect();
             // Give the OS BLE stack a moment to actually tear down the link
             // before re-establishing it -- an immediate gatt.connect() can
-            // silently reuse the stale session on some platforms.
-            await new Promise((r) => setTimeout(r, 300));
+            // silently reuse the stale session on some platforms. _setupServer()
+            // additionally retries service discovery itself, since this alone
+            // isn't always enough for the GATT service cache to settle.
+            await new Promise((r) => setTimeout(r, 500));
         }
         await this._setupServer();
     }
@@ -86,6 +88,14 @@ export class BleManager {
         // against a single service fails with "No Characteristics matching UUID
         // … found in Service …". Discover each service the device exposes and
         // resolve characteristics against all of them.
+        //
+        // Right after gatt.connect() -- especially on a fast reconnect, as
+        // reconnectGatt() does -- Chrome's GATT service cache can take a beat
+        // to settle: getPrimaryService() throws transiently even for a service
+        // the device genuinely exposes. The command channel (Nordic UART) is
+        // required for every exchange(), so retry it a few times instead of
+        // silently leaving `_services` without it, which used to surface later
+        // as a confusing "Characteristic ... not found" from an unrelated call.
         this._services = [];
         for (const svcUuid of [
             NORDIC_UART_SERVICE_UUID,
@@ -93,9 +103,27 @@ export class BleManager {
             WACOM_LIVE_SERVICE_UUID,
             SYSEVENT_NOTIFICATION_SERVICE_UUID,
         ]) {
-            try {
-                this._services.push(await this._server.getPrimaryService(svcUuid));
-            } catch { /* device doesn't expose this service — skip it */ }
+            const required = svcUuid === NORDIC_UART_SERVICE_UUID;
+            const attempts = required ? 5 : 1;
+            let service = null;
+            let lastErr;
+            for (let i = 0; i < attempts; i++) {
+                try {
+                    service = await this._server.getPrimaryService(svcUuid);
+                    break;
+                } catch (e) {
+                    lastErr = e;
+                    if (i < attempts - 1) await new Promise((r) => setTimeout(r, 250));
+                }
+            }
+            if (service) {
+                this._services.push(service);
+            } else if (required) {
+                throw new Error(
+                    `Command service not available after reconnect (${lastErr?.message ?? 'unknown error'}). `
+                    + 'Try syncing again.'
+                );
+            }
         }
         // Keep the Nordic UART service reference for callers that expect it.
         this._service = this._services[0] ?? null;

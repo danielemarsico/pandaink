@@ -29,6 +29,14 @@ Format: `## Unreleased` for pending changes; `## <version> — <date>` for relea
   disconnects after every fetch. Adds `BleManager.reconnectGatt()` (bounces the GATT
   connection without re-showing the browser's device picker) and calls it before each sync
   after the first.
+- fix: the `reconnectGatt()` fix above could itself fail on the second sync with
+  `Characteristic ... not found in any discovered service`. Right after a fast
+  disconnect/reconnect, Chrome's GATT service cache can take a beat to settle, so
+  `getPrimaryService()` for the command channel (Nordic UART) was transiently throwing and
+  being silently swallowed by the per-service discovery loop, leaving every later
+  characteristic lookup broken with no clear error at the point of failure. Service discovery
+  for that required service now retries with backoff and raises a clear error immediately if
+  it still isn't available.
 
 - fix: connecting from a new browser/device right after sign-in could show the same synced
   drawing twice. `mount()` loads the drawing list directly and also gets an immediate replay
