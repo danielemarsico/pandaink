@@ -151,9 +151,6 @@ sync would fail on real hardware even after the GATT/notify fixes.
          command (`SET_TIME`) was rejected with INVALID_STATE too.
       Lesson: reconnecting immediately before a sync races the device; the
       disconnect has to happen when the previous sync ends.
-- [ ] **C2 — Slate stroke-file parser** (`sync.js` `parseStrokeData()`): sync a
-      real Folio drawing and compare visually against the same drawing synced
-      by the Python GUI — stroke count, shape, no corner spikes at 65535.
 - [ ] **GUI Live mode** (Windows app): Start Live → draw → strokes appear in
       real time → Stop Live → drawing saved as a new tab.
 - [ ] **Port `register_device_finish()`** into the web registration flow
