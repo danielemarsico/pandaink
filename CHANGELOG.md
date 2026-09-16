@@ -22,10 +22,11 @@ Format: `## Unreleased` for pending changes; `## <version> — <date>` for relea
   created (App folder scope, PKCE, redirect URI pointed at `app.html`), so Dropbox is now
   selectable as a Pro storage provider.
 - fix: a second sync in the same session no longer hangs on `CONNECT INVALID_STATE`
-  (pending hardware confirmation). On a link that already completed the CONNECT handshake,
-  the device answers a repeat CONNECT with INVALID_STATE meaning "already connected", not
-  "press the button" — the sync now proceeds instead of waiting 25s, with no BLE disconnect.
-  A first CONNECT on a fresh link still waits for the button as before.
+  (pending hardware confirmation). The Folio only accepts a new sync on a fresh BLE link, so
+  the app now closes the link when a sync finishes (as the Python app does) and the next Sync
+  reopens it without showing the device picker, retrying for up to 20s if the device drops
+  the link while it settles. Between syncs the connection dot shows "not connected"; that is
+  expected.
 - revert: reverted two attempted fixes for the "second sync in the same session hangs on
   `CONNECT INVALID_STATE`" bug (`BleManager.reconnectGatt()` + retrying service discovery on
   reconnect). On real hardware, forcing a GATT disconnect/reconnect before each sync made

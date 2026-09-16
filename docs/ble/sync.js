@@ -816,17 +816,7 @@ async function connectAuthorized(bleManager, uuidBytes, onConnectWait) {
 
         if (opcode === REPLY_ACK) {
             const status = reply.getUint8(2);
-            if (status === 0x00) {                               // authenticated
-                bleManager.authenticated = true;
-                return;
-            }
-            // A repeat CONNECT on a link that already authenticated gets
-            // INVALID_STATE ("already connected"), not "press the button" --
-            // wacom_win.py live_mode() likewise proceeds past it.
-            if (status === ERR_INVALID_STATE && bleManager.authenticated) {
-                trace('CONNECT INVALID_STATE on an already-authenticated link — proceeding');
-                return;
-            }
+            if (status === 0x00) return;                         // authenticated
             if (status === ERR_INVALID_STATE) {
                 if (Date.now() >= deadline) throw deviceNotReadyError();
                 const secondsLeft = Math.max(1, Math.round((deadline - Date.now()) / 1000));
@@ -837,7 +827,6 @@ async function connectAuthorized(bleManager, uuidBytes, onConnectWait) {
             }
             throw new Error(`Device rejected connection (error code 0x${status.toString(16)})`);
         } else if (opcode === REPLY_CONNECT_OK) {
-            bleManager.authenticated = true;
             return;
         } else if (opcode === REPLY_CONNECT_FAIL) {
             const reason = reply.getUint8(2 + 6); // after the 6-byte echoed uuid

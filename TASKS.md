@@ -175,15 +175,25 @@ sync would fail on real hardware even after the GATT/notify fixes.
       both failed, in two different ways, suggesting the real constraint is
       event-driven rather than timing-driven.
 
-      **Attempt 3 (in test)**: no reconnect at all. `BleManager.authenticated`
-      is set when CONNECT succeeds on the current link (reset on connect /
-      disconnect / `gattserverdisconnected`); `connectAuthorized()` in
-      `sync.js` treats INVALID_STATE on an already-authenticated link as
-      "already connected" and proceeds (same as `wacom_win.py:593` in live
-      mode). Test: sync, draw, sync again without reloading. If a later
-      command fails instead, fall back to the approach below.
+      **Attempt 3 (commit `7f9d21d`, failed, reverted)**: no reconnect at all.
+      Tracked a per-link `authenticated` flag and treated INVALID_STATE on an
+      already-authenticated link as "already connected", proceeding (as
+      `wacom_win.py:593` does in live mode). Hardware result: the very next
+      command, `SET_TIME`, was also rejected with `[b3 01 02]`. So
+      INVALID_STATE really means the device refuses commands on that link;
+      a fresh BLE link is required.
 
-      **Fallback approach**: drive the reconnect off the actual
+      **Attempt 4 (in test)**: follow the Python flow exactly — close the
+      link at the END of every sync (`BleManager.closeLink()`, waits for
+      `gattserverdisconnected`), and reopen it at the START of the next sync
+      (`BleManager.reconnect()`: `gatt.connect()` on the already-picked
+      device, no picker; the whole connect + service discovery is retried
+      every 1s for up to 20s if the link drops during discovery). Unlike
+      attempts 1–2, the natural gap while the user draws separates the
+      disconnect from the reconnect. Test: sync, draw, sync again without
+      reloading. If the reconnect keeps failing, the notes below still apply.
+
+      **Earlier idea for a fallback**: drive the reconnect off the actual
       `gattserverdisconnected` event — call `gatt.disconnect()`, `await` a
       one-shot listener for `gattserverdisconnected` actually firing (not a
       `setTimeout`), *then* call `gatt.connect()`. Also worth checking whether

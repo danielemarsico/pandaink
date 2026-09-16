@@ -445,7 +445,16 @@ export class AppController {
     // any GATT characteristic, or they crash deep inside sync.js/live.js.
     async _ensureBleConnected() {
         if (this._ble.isConnected()) return;
-        await this._ble.connect();
+        if (this._ble.hasDevice()) {
+            // Picked earlier on this page (e.g. the link was closed after the
+            // last sync) — reopen it without showing the device picker again.
+            this._setStatus('Reconnecting to the device…');
+            await this._ble.reconnect({
+                onRetry: () => this._setStatus('Reconnecting — press the device button if it is asleep…'),
+            });
+        } else {
+            await this._ble.connect();
+        }
         this._updateConnDot();
     }
 
@@ -588,6 +597,10 @@ export class AppController {
                 console.error(err);
             }
         } finally {
+            // The Folio refuses a second sync on the same BLE link (CONNECT →
+            // INVALID_STATE), so close the link now; the next Sync reopens it.
+            try { await this._ble.closeLink(); } catch (e) { console.warn('closeLink failed:', e); }
+            this._updateConnDot();
             btn.disabled = false;
         }
     }
