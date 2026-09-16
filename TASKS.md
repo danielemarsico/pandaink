@@ -73,11 +73,12 @@ Each is independent unless noted.
          **Advanced → Go to PandaInk (unsafe)**. Warn early testers.
 
 ### Ko-fi (Pro = one-time $5)
-- [ ] **Configure the Ko-fi Shop item's webhook** to point at
+- [x] **Configure the Ko-fi Shop item's webhook** to point at
       `https://pandaink-api.marsicod.workers.dev/kofi/webhook`, then send a
       test webhook (or make a real $5 purchase) and confirm the Worker sets
       `profiles.plan = 'pro'` for the matching Supabase account.
-      `KOFI_PRO_URL` is already set in `docs/config.js`.
+      `KOFI_PRO_URL` is already set in `docs/config.js`. Confirmed working —
+      real $5 purchase flipped `profiles.plan` to `pro`.
 
 ---
 
@@ -96,14 +97,17 @@ now simply untested paths.
       (Covers the previously-separate "test live sharing end-to-end" item.)
 
 **After `DROPBOX_CLIENT_ID` is set (and a Pro account):**
-- [ ] **Dropbox** — connect, sync a drawing, confirm `drawing_<ts>.json` lands
+- [x] **Dropbox** — connect, sync a drawing, confirm `drawing_<ts>.json` lands
       in the app folder and re-appears after reload / in another browser
-      (reconciliation).
+      (reconciliation). Confirmed working — synced a drawing to Dropbox
+      successfully.
 
 **After the Ko-fi webhook is configured:**
-- [ ] **Pro purchase** — buy the $5 item with the account email →
+- [x] **Pro purchase** — buy the $5 item with the account email →
       `profiles.plan` flips to `pro` → Drive & Dropbox unlock in the picker.
-      Verify a mismatched email is handled (manual reconcile).
+      Verify a mismatched email is handled (manual reconcile). Confirmed
+      working — purchase flipped the account to Pro and unlocked Dropbox.
+      Mismatched-email reconcile still untested.
 
 ---
 
