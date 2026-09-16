@@ -21,22 +21,17 @@ Format: `## Unreleased` for pending changes; `## <version> — <date>` for relea
 - chore: set `DROPBOX_CLIENT_ID` in `docs/config.js` — the Dropbox App Console app is
   created (App folder scope, PKCE, redirect URI pointed at `app.html`), so Dropbox is now
   selectable as a Pro storage provider.
-- fix: syncing a second drawing in the same browser session hung forever on
-  `CONNECT INVALID_STATE`, no matter how many times the device's button was pressed (only a
-  full page reload recovered). The device's own CONNECT handshake only re-arms after the
-  physical BLE link actually drops; the web app was reusing the existing GATT session for
-  every sync after the first instead of reconnecting, unlike the Python reference which
-  disconnects after every fetch. Adds `BleManager.reconnectGatt()` (bounces the GATT
-  connection without re-showing the browser's device picker) and calls it before each sync
-  after the first.
-- fix: the `reconnectGatt()` fix above could itself fail on the second sync with
-  `Characteristic ... not found in any discovered service`. Right after a fast
-  disconnect/reconnect, Chrome's GATT service cache can take a beat to settle, so
-  `getPrimaryService()` for the command channel (Nordic UART) was transiently throwing and
-  being silently swallowed by the per-service discovery loop, leaving every later
-  characteristic lookup broken with no clear error at the point of failure. Service discovery
-  for that required service now retries with backoff and raises a clear error immediately if
-  it still isn't available.
+- revert: reverted two attempted fixes for the "second sync in the same session hangs on
+  `CONNECT INVALID_STATE`" bug (`BleManager.reconnectGatt()` + retrying service discovery on
+  reconnect). On real hardware, forcing a GATT disconnect/reconnect before each sync made
+  things worse — clicking Sync now disconnected the device outright instead of hanging.
+  `docs/ble/ble_manager.js` and `docs/ui/app_controller.js` are back to the last known-working
+  behavior: a second sync in the same session still requires a page reload + reconnect as a
+  workaround. Root cause (the device's CONNECT handshake only re-arming after a real BLE link
+  drop) still stands; the fix needs a different approach than a fixed-delay GATT bounce —
+  likely driven off the actual `gattserverdisconnected` event rather than a timeout, and
+  needs to be validated against real hardware before landing again, not just reasoned about
+  from the Python reference.
 
 - fix: connecting from a new browser/device right after sign-in could show the same synced
   drawing twice. `mount()` loads the drawing list directly and also gets an immediate replay

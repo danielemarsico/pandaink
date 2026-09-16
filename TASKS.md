@@ -118,18 +118,26 @@ sync would fail on real hardware even after the GATT/notify fixes.
 - [x] **C1a — sync 1 drawing**: confirmed against the real Folio — 191 chunks,
       3250 bytes, device CRC matched computed CRC, 9 strokes / 896 points parsed.
 - [ ] **C1b — sync with 0 drawings on device**: still untested.
-- [x] **C1c — sync several in one session — found a real bug, now fixed**:
-      the second sync in the same browser session hung forever on
-      `CONNECT INVALID_STATE` no matter how many times the device button was
-      pressed; only a full page reload recovered. Root cause: the device's
-      CONNECT handshake only re-arms after the physical BLE link actually
-      drops, but `app_controller.js` was reusing the existing GATT session for
-      every sync after the first (unlike the Python reference, which
-      disconnects after every fetch — `base_win.py:229`). Fixed by adding
-      `BleManager.reconnectGatt()` (bounces the GATT connection without
-      re-showing the device picker) and calling it before each sync after the
-      first. **Needs a hardware re-test**: sync 2+ drawings back-to-back in one
-      session and confirm no hang.
+- [ ] **C1c — sync several in one session — known bug, unresolved, two attempted
+      fixes reverted**: the second sync in the same browser session hangs
+      forever on `CONNECT INVALID_STATE` no matter how many times the device
+      button is pressed; only a full page reload + reconnect recovers it
+      (current workaround). Root cause: the device's CONNECT handshake only
+      re-arms after the physical BLE link actually drops, but
+      `app_controller.js` reuses the existing GATT session for every sync
+      after the first (unlike the Python reference, which disconnects after
+      every fetch — `base_win.py:229`).
+      Tried and reverted: a `BleManager.reconnectGatt()` that forces a
+      disconnect/reconnect before each sync (with a fixed settle delay, later
+      with retried service discovery too) — on real hardware this made it
+      *worse*: clicking Sync disconnected the device outright instead of
+      hanging. A fixed-delay GATT bounce is the wrong shape for this fix.
+      **Next approach to try**: drive the reconnect off the actual
+      `gattserverdisconnected` event (wait for it to actually fire after
+      `gatt.disconnect()`, rather than a fixed timeout) before calling
+      `gatt.connect()` again — and validate each iteration against the real
+      Folio before considering it done, not just against the Python
+      reference.
 - [ ] **C2 — Slate stroke-file parser** (`sync.js` `parseStrokeData()`): sync a
       real Folio drawing and compare visually against the same drawing synced
       by the Python GUI — stroke count, shape, no corner spikes at 65535.

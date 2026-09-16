@@ -40,38 +40,6 @@ export class BleManager {
         };
         this._device.addEventListener('gattserverdisconnected', this._disconnectHandler);
 
-        await this._setupServer();
-
-        return {
-            name: this._device.name,
-            // Web Bluetooth does not expose MAC addresses directly; use id as proxy
-            address: this._device.id,
-        };
-    }
-
-    // Ports base_win.py's disconnect_device() + reconnect cycle between fetches.
-    // The Wacom protocol's own CONNECT command (opcode 0xe6) only re-arms once
-    // the physical BLE link has actually dropped -- resending it over an
-    // already-open GATT session just gets rejected with INVALID_STATE forever,
-    // no matter how many times the device's button is pressed. A full page
-    // reload "fixes" this only because it forces a brand-new GATT connection;
-    // this does the same thing without reopening the device picker (reuses the
-    // already-authorized `this._device`, unlike connect()'s requestDevice()).
-    async reconnectGatt() {
-        if (!this._device) throw new Error('No device to reconnect to — call connect() first.');
-        if (this._device.gatt.connected) {
-            this._device.gatt.disconnect();
-            // Give the OS BLE stack a moment to actually tear down the link
-            // before re-establishing it -- an immediate gatt.connect() can
-            // silently reuse the stale session on some platforms. _setupServer()
-            // additionally retries service discovery itself, since this alone
-            // isn't always enough for the GATT service cache to settle.
-            await new Promise((r) => setTimeout(r, 500));
-        }
-        await this._setupServer();
-    }
-
-    async _setupServer() {
         // Characteristic/notify-handler references are tied to the GATT
         // session they were retrieved from -- they go stale on reconnect
         // (even to the same device) and must not be reused, or later calls
@@ -88,14 +56,6 @@ export class BleManager {
         // against a single service fails with "No Characteristics matching UUID
         // … found in Service …". Discover each service the device exposes and
         // resolve characteristics against all of them.
-        //
-        // Right after gatt.connect() -- especially on a fast reconnect, as
-        // reconnectGatt() does -- Chrome's GATT service cache can take a beat
-        // to settle: getPrimaryService() throws transiently even for a service
-        // the device genuinely exposes. The command channel (Nordic UART) is
-        // required for every exchange(), so retry it a few times instead of
-        // silently leaving `_services` without it, which used to surface later
-        // as a confusing "Characteristic ... not found" from an unrelated call.
         this._services = [];
         for (const svcUuid of [
             NORDIC_UART_SERVICE_UUID,
@@ -103,30 +63,18 @@ export class BleManager {
             WACOM_LIVE_SERVICE_UUID,
             SYSEVENT_NOTIFICATION_SERVICE_UUID,
         ]) {
-            const required = svcUuid === NORDIC_UART_SERVICE_UUID;
-            const attempts = required ? 5 : 1;
-            let service = null;
-            let lastErr;
-            for (let i = 0; i < attempts; i++) {
-                try {
-                    service = await this._server.getPrimaryService(svcUuid);
-                    break;
-                } catch (e) {
-                    lastErr = e;
-                    if (i < attempts - 1) await new Promise((r) => setTimeout(r, 250));
-                }
-            }
-            if (service) {
-                this._services.push(service);
-            } else if (required) {
-                throw new Error(
-                    `Command service not available after reconnect (${lastErr?.message ?? 'unknown error'}). `
-                    + 'Try syncing again.'
-                );
-            }
+            try {
+                this._services.push(await this._server.getPrimaryService(svcUuid));
+            } catch { /* device doesn't expose this service — skip it */ }
         }
         // Keep the Nordic UART service reference for callers that expect it.
         this._service = this._services[0] ?? null;
+
+        return {
+            name: this._device.name,
+            // Web Bluetooth does not expose MAC addresses directly; use id as proxy
+            address: this._device.id,
+        };
     }
 
     async disconnect() {
